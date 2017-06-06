@@ -68,6 +68,8 @@
  *      Colormap conversion
  *           PIXCMAP    *pixcmapGrayToColor()
  *           PIXCMAP    *pixcmapColorToGray()
+ *           PIXCMAP    *pixcmapConvertTo4()
+ *           PIXCMAP    *pixcmapConvertTo8()
  *
  *      Colormap I/O
  *           l_int32     pixcmapRead()
@@ -647,7 +649,7 @@ pixcmapGetDepth(PIXCMAP  *cmap)
  *
  * <pre>
  * Notes:
- *      (1) On error, \&mindepth is returned as 0.
+ *      (1) On error, &mindepth is returned as 0.
  * </pre>
  */
 l_int32
@@ -683,7 +685,7 @@ l_int32  ncolors;
  *
  * <pre>
  * Notes:
- *      This removes the colors by setting the count to 0.
+ *      (1) This removes the colors by setting the count to 0.
  * </pre>
  */
 l_int32
@@ -1506,6 +1508,78 @@ PIXCMAP   *cmapd;
 }
 
 
+/*!
+ * \brief   pixcmapConvertTo4()
+ *
+ * \param[in]    cmaps   colormap for 2 bpp pix
+ * \return  cmapd   (4 bpp)
+ *
+ * <pre>
+ * Notes:
+ *      (1) This converts a 2 bpp colormap to 4 bpp.  The colors
+ *          are the same; the output colormap entry array has size 16.
+ * </pre>
+ */
+PIXCMAP *
+pixcmapConvertTo4(PIXCMAP  *cmaps)
+{
+l_int32   i, n, rval, gval, bval;
+PIXCMAP  *cmapd;
+
+    PROCNAME("pixcmapConvertTo4");
+
+    if (!cmaps)
+        return (PIXCMAP *)ERROR_PTR("cmaps not defined", procName, NULL);
+    if (pixcmapGetDepth(cmaps) != 2)
+        return (PIXCMAP *)ERROR_PTR("cmaps not for 2 bpp pix", procName, NULL);
+
+    cmapd = pixcmapCreate(4);
+    n = pixcmapGetCount(cmaps);
+    for (i = 0; i < n; i++) {
+        pixcmapGetColor(cmaps, i, &rval, &gval, &bval);
+        pixcmapAddColor(cmapd, rval, gval, bval);
+    }
+    return cmapd;
+}
+
+
+/*!
+ * \brief   pixcmapConvertTo8()
+ *
+ * \param[in]    cmaps   colormap for 2 bpp or 4 bpp pix
+ * \return  cmapd   (8 bpp)
+ *
+ * <pre>
+ * Notes:
+ *      (1) This converts a 2 bpp or 4 bpp colormap to 8 bpp.  The colors
+ *          are the same; the output colormap entry array has size 256.
+ * </pre>
+ */
+PIXCMAP *
+pixcmapConvertTo8(PIXCMAP  *cmaps)
+{
+l_int32   i, n, depth, rval, gval, bval;
+PIXCMAP  *cmapd;
+
+    PROCNAME("pixcmapConvertTo8");
+
+    if (!cmaps)
+        return (PIXCMAP *)ERROR_PTR("cmaps not defined", procName, NULL);
+    depth = pixcmapGetDepth(cmaps);
+    if (depth == 8) return pixcmapCopy(cmaps);
+    if (depth != 2 && depth != 4)
+        return (PIXCMAP *)ERROR_PTR("cmaps not 2 or 4 bpp", procName, NULL);
+
+    cmapd = pixcmapCreate(8);
+    n = pixcmapGetCount(cmaps);
+    for (i = 0; i < n; i++) {
+        pixcmapGetColor(cmaps, i, &rval, &gval, &bval);
+        pixcmapAddColor(cmapd, rval, gval, bval);
+    }
+    return cmapd;
+}
+
+   
 /*-------------------------------------------------------------*
  *                         Colormap I/O                        *
  *-------------------------------------------------------------*/
@@ -1617,7 +1691,8 @@ l_int32
 pixcmapWrite(const char  *filename,
              PIXCMAP     *cmap)
 {
-FILE  *fp;
+l_int32  ret;
+FILE    *fp;
 
     PROCNAME("pixcmapWrite");
 
@@ -1628,10 +1703,10 @@ FILE  *fp;
 
     if ((fp = fopenWriteStream(filename, "w")) == NULL)
         return ERROR_INT("stream not opened", procName, 1);
-    if (pixcmapWriteStream(fp, cmap))
-        return ERROR_INT("cmap not written to stream", procName, 1);
+    ret = pixcmapWriteStream(fp, cmap);
     fclose(fp);
-
+    if (ret)
+        return ERROR_INT("cmap not written to stream", procName, 1);
     return 0;
 }
 
@@ -1714,7 +1789,7 @@ FILE    *fp;
         return ERROR_INT("stream not opened", procName, 1);
     ret = pixcmapWriteStream(fp, cmap);
 #else
-    L_WARNING("work-around: writing to a temp file\n", procName);
+    L_INFO("work-around: writing to a temp file\n", procName);
   #ifdef _WIN32
     if ((fp = fopenWriteWinTempfile()) == NULL)
         return ERROR_INT("tmpfile stream not opened", procName, 1);
@@ -1944,7 +2019,7 @@ PIXCMAP  *cmap;
  * Notes:
  *      (1) The number of bytes in %data is 3 * ncolors.
  *      (2) Output is in form:
- *             \< r0g0b0 r1g1b1 ... rngnbn \>
+ *             < r0g0b0 r1g1b1 ... rngnbn >
  *          where r0, g0, b0 ... are each 2 bytes of hex ascii
  *      (3) This is used in pdf files to express the colormap as an
  *          array in ascii (human-readable) format.
@@ -2107,9 +2182,9 @@ NUMA    *nac;
  * Notes:
  *      (1) This is an in-place transform
  *      (2) It does a proportional shift of the intensity for each color.
- *      (3) If fraction \< 0.0, it moves all colors towards (0,0,0).
+ *      (3) If fraction < 0.0, it moves all colors towards (0,0,0).
  *          This darkens the image.
- *          If fraction \> 0.0, it moves all colors towards (255,255,255)
+ *          If fraction > 0.0, it moves all colors towards (255,255,255)
  *          This fades the image.
  *      (4) The equivalent transform can be accomplished with pixcmapGammaTRC(),
  *          but it is considerably more difficult (see numaGammaTRC()).

@@ -493,11 +493,11 @@ l_float32  sum, sumsq, val, mean, var;
  *          any or all of these derived arrays.
  *      (2) These statistical measures over the values in the
  *          rectangular window are:
- *            ~ average value: \<x\>  (nam)
- *            ~ average squared value: \<x*x\> (nams)
- *            ~ variance: \<(x - \<x\>)*(x - \<x\>)\> = \<x*x\> - \<x\>*\<x\>  (nav)
+ *            ~ average value: <x>  (nam)
+ *            ~ average squared value: <x*x> (nams)
+ *            ~ variance: <(x - <x>)*(x - <x>)> = <x*x> - <x>*<x>  (nav)
  *            ~ square-root of variance: (narv)
- *          where the brackets \< .. \> indicate that the average value is
+ *          where the brackets < .. > indicate that the average value is
  *          to be taken over the window.
  *      (3) Note that the variance is just the mean square difference from
  *          the mean value; and the square root of the variance is the
@@ -583,8 +583,11 @@ NUMA       *na1, *nad;
     fad = numaGetFArray(nad, L_NOCOPY);
 
         /* Make sum array; note the indexing */
-    if ((suma = (l_float32 *)LEPT_CALLOC(n1 + 1, sizeof(l_float32))) == NULL)
+    if ((suma = (l_float32 *)LEPT_CALLOC(n1 + 1, sizeof(l_float32))) == NULL) {
+        numaDestroy(&na1);
+        numaDestroy(&nad);
         return (NUMA *)ERROR_PTR("suma not made", procName, NULL);
+    }
     sum = 0.0;
     suma[0] = 0.0;
     for (i = 0; i < n1; i++) {
@@ -640,8 +643,11 @@ NUMA       *na1, *nad;
     fad = numaGetFArray(nad, L_NOCOPY);
 
         /* Make sum array; note the indexing */
-    if ((suma = (l_float32 *)LEPT_CALLOC(n1 + 1, sizeof(l_float32))) == NULL)
+    if ((suma = (l_float32 *)LEPT_CALLOC(n1 + 1, sizeof(l_float32))) == NULL) {
+        numaDestroy(&na1);
+        numaDestroy(&nad);
         return (NUMA *)ERROR_PTR("suma not made", procName, NULL);
+    }
     sum = 0.0;
     suma[0] = 0.0;
     for (i = 0; i < n1; i++) {
@@ -677,7 +683,7 @@ NUMA       *na1, *nad;
  *          are returned, where the variance is the average over the
  *          window of the mean square difference of the pixel value
  *          from the mean:
- *                \<(x - \<x\>)*(x - \<x\>)\> = \<x*x\> - \<x\>*\<x\>
+ *                <(x - <x>)*(x - <x>)> = <x*x> - <x>*<x>
  * </pre>
  */
 l_int32
@@ -742,7 +748,7 @@ NUMA       *nav, *narv;  /* variance and square root of variance */
  * Notes:
  *      (1) The requested window has width = 2 * %halfwin + 1.
  *      (2) If the input nas has less then 3 elements, return a copy.
- *      (3) If the filter is too small (%halfwin \<= 0), return a copy.
+ *      (3) If the filter is too small (%halfwin <= 0), return a copy.
  *      (4) If the filter is too large, it is reduced in size.
  *      (5) We add a mirrored border of size %halfwin to each end of
  *          the array to simplify the calculation by avoiding end-effects.
@@ -843,7 +849,7 @@ NUMA    *nad;
  *          the size of bins necessary to accommodate the input data,
  *          is returned.  It is one of the sequence:
  *                {1, 2, 5, 10, 20, 50, ...}.
- *      (3) If \&binstart is given, all values are accommodated,
+ *      (3) If &binstart is given, all values are accommodated,
  *          and the min value of the starting bin is returned.
  *          Otherwise, all negative values are discarded and
  *          the histogram bins start at 0.
@@ -919,8 +925,10 @@ NUMA      *nai, *nahist;
 
         /* Make histogram, converting value in input array
          * into a bin number for this histogram array. */
-    if ((nahist = numaCreate(nbins)) == NULL)
+    if ((nahist = numaCreate(nbins)) == NULL) {
+        numaDestroy(&nai);
         return (NUMA *)ERROR_PTR("nahist not made", procName, NULL);
+    }
     numaSetCount(nahist, nbins);
     numaSetParameters(nahist, iminval, binsize);
     for (i = 0; i < n; i++) {
@@ -1036,7 +1044,7 @@ NUMA      *nah;
  * <pre>
  * Notes:
  *      (1) This simple function generates a histogram of values
- *          from na, discarding all values \< 0.0 or greater than
+ *          from na, discarding all values < 0.0 or greater than
  *          min(%maxsize, maxval), where maxval is the maximum value in na.
  *          The histogram data is put in bins of size delx = %binsize,
  *          starting at x = 0.0.  We use as many bins as are
@@ -1219,7 +1227,7 @@ NUMA      *nad;
  *          Use %maxbins == 0 to force the bin size to be 1.
  *      (6) This optionally returns the median and one arbitrary rank value.
  *          If you need several rank values, return the histogram and use
- *               numaHistogramGetValFromRank(nah, rank, \&rval)
+ *               numaHistogramGetValFromRank(nah, rank, &rval)
  *          multiple times.
  * </pre>
  */
@@ -1423,6 +1431,7 @@ l_float32  sum, sumval, halfsum, moment, var, x, y, ymax;
     }
 
     if (pxmode) {
+        imax = -1;
         ymax = -1.0e10;
         for (i = ifirst; i <= ilast; i++) {
             numaGetFValue(nahisto, i, &y);
@@ -1662,10 +1671,10 @@ l_float32  startval, binsize, rankcount, total, sum, fract, val;
  *          array values, but any array of non-negative numbers will work.
  *      (3) The output arrays give the following mappings, where the
  *          input is a normalized histogram of array values:
- *             array values     --\>  rank bin number  (narbin)
- *             rank bin number  --\>  median array value in bin (nam)
- *             array values     --\>  cumulative norm = rank  (nar)
- *             rank bin number  --\>  array value at right bin edge (nabb)
+ *             array values     -->  rank bin number  (narbin)
+ *             rank bin number  -->  median array value in bin (nam)
+ *             array values     -->  cumulative norm = rank  (nar)
+ *             rank bin number  -->  array value at right bin edge (nabb)
  * </pre>
  */
 l_int32
@@ -1701,7 +1710,8 @@ l_float32  sum, midrank, endrank, val;
          * as input, we have 256 bins and 257 points in the
          * cumulative (rank) histogram. */
     npts = numaGetCount(na);
-    nar = numaCreate(npts + 1);
+    if ((nar = numaCreate(npts + 1)) == NULL)
+        return ERROR_INT("nar not made", procName, 1);
     sum = 0.0;
     numaAddNumber(nar, sum);  /* left side of first bin */
     for (i = 0; i < npts; i++) {
@@ -1710,12 +1720,16 @@ l_float32  sum, midrank, endrank, val;
         numaAddNumber(nar, sum);
     }
 
-    if ((nam = numaCreate(nbins)) == NULL)
-        return ERROR_INT("nam not made", procName, 1);
-    if ((narbin = numaCreate(npts)) == NULL)
-        return ERROR_INT("narbin not made", procName, 1);
-    if ((nabb = numaCreate(nbins)) == NULL)
-        return ERROR_INT("nabb not made", procName, 1);
+    nam = numaCreate(nbins);
+    narbin = numaCreate(npts);
+    nabb = numaCreate(nbins);
+    if (!nam || !narbin || !nabb) {
+        numaDestroy(&nar);
+        numaDestroy(&nam);
+        numaDestroy(&narbin);
+        numaDestroy(&nabb);
+        return ERROR_INT("numa not made", procName, 1);
+    }
 
         /* We find the intensity value at the right edge of each of
          * the rank bins.  We also find the median intensity in the bin,
@@ -1807,8 +1821,8 @@ l_float32  sum, midrank, endrank, val;
  * Notes:
  *      (1) Simple interface for getting a binned rank representation
  *          of an input array of values.  This returns two mappings:
- *             array value     --\>  rank bin number  (narbin)
- *             rank bin number --\>  median array value in each rank bin (nam)
+ *             array value     -->  rank bin number  (narbin)
+ *             rank bin number -->  median array value in each rank bin (nam)
  * </pre>
  */
 l_int32
@@ -1950,7 +1964,8 @@ NUMA      *nascore, *naave1, *naave2, *nanum1, *nanum2;
         /* Split the histogram with [0 ... i] in the lower part
          * and [i+1 ... n-1] in upper part.  First, compute an otsu
          * score for each possible splitting.  */
-    nascore = numaCreate(n);
+    if ((nascore = numaCreate(n)) == NULL)
+        return ERROR_INT("nascore not made", procName, 1);
     if (pave2) naave1 = numaCreate(n);
     if (pave2) naave2 = numaCreate(n);
     if (pnum1) nanum1 = numaCreate(n);
@@ -2200,11 +2215,11 @@ NUMA       *na3;
  *         where each histogram is one row of the array.  The stats are
  *         then aggregated column-wise, between the histograms.
  *     (2) These stats are:
- *            ~ average value: \<v\>  (nam)
- *            ~ average squared value: \<v*v\> (nams)
- *            ~ variance: \<(v - \<v\>)*(v - \<v\>)\> = \<v*v\> - \<v\>*\<v\>  (nav)
+ *            ~ average value: <v>  (nam)
+ *            ~ average squared value: <v*v> (nams)
+ *            ~ variance: <(v - <v>)*(v - <v>)> = <v*v> - <v>*<v>  (nav)
  *            ~ square-root of variance: (narv)
- *         where the brackets \< .. \> indicate that the average value is
+ *         where the brackets < .. > indicate that the average value is
  *         to be taken over each column of the array.
  *     (3) The input histograms are optionally smoothed before these
  *         statistical operations.
@@ -2335,8 +2350,10 @@ NUMA      *na, *napeak;
         /* We munge this copy */
     if ((na = numaCopy(nas)) == NULL)
         return (NUMA *)ERROR_PTR("na not made", procName, NULL);
-    if ((napeak = numaCreate(4 * nmax)) == NULL)
+    if ((napeak = numaCreate(4 * nmax)) == NULL) {
+        numaDestroy(&na);
         return (NUMA *)ERROR_PTR("napeak not made", procName, NULL);
+    }
 
     for (k = 0; k < nmax; k++) {
         numaGetSum(na, &newtotal);
@@ -2789,13 +2806,11 @@ NUMA      *nap, *nad;
 
     PROCNAME("numaCrossingsByPeaks");
 
-    if (!nax)
-        return (NUMA *)ERROR_PTR("nax not defined", procName, NULL);
     if (!nay)
         return (NUMA *)ERROR_PTR("nay not defined", procName, NULL);
 
-    n = numaGetCount(nax);
-    if (numaGetCount(nay) != n)
+    n = numaGetCount(nay);
+    if (nax && (numaGetCount(nax) != n))
         return (NUMA *)ERROR_PTR("nax and nay sizes differ", procName, NULL);
 
         /* Find the extrema.  Also add last point in nay to get
@@ -2806,8 +2821,8 @@ NUMA      *nap, *nad;
     np = numaGetCount(nap);
     L_INFO("Number of crossings: %d\n", procName, np);
 
-        /* Do all computation in index units of nax */
-    nad = numaCreate(np);  /* output crossings, in nax units */
+        /* Do all computation in index units of nax or the delx of nay */
+    nad = numaCreate(np);  /* output crossing locations, in nax units */
     previndex = 0;  /* prime the search with 1st point */
     numaGetFValue(nay, 0, &prevval);  /* prime the search with 1st point */
     numaGetParameters(nay, &startx, &delx);
@@ -2915,7 +2930,7 @@ l_float32  bestwidth, bestshift, bestscore;
     if (!nas)
         return ERROR_INT("nas not defined", procName, 1);
 
-    bestscore = 0.0;
+    bestscore = bestwidth = bestshift = 0.0;
     delwidth = (maxwidth - minwidth) / (nwidth - 1.0);
     for (i = 0; i < nwidth; i++) {
         width = minwidth + delwidth * i;
@@ -2972,7 +2987,7 @@ l_float32  bestwidth, bestshift, bestscore;
  *      (3) To get a Haar-like result, use relweight = 1.0.  For detecting
  *          signals where you expect every other sample to be close to
  *          zero, as with barcodes or filtered text lines, you can
- *          use relweight \> 1.0.
+ *          use relweight > 1.0.
  * </pre>
  */
 l_int32

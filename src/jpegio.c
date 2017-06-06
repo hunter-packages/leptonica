@@ -798,7 +798,7 @@ JSAMPROW                     rowbuffer;
 PIX                         *pix;
 struct jpeg_compress_struct  cinfo;
 struct jpeg_error_mgr        jerr;
-const char                  *text;
+char                        *text;
 jmp_buf                      jmpbuf;  /* must be local to the function */
 
     PROCNAME("pixWriteStreamJpeg");
@@ -901,8 +901,16 @@ jmp_buf                      jmpbuf;  /* must be local to the function */
 
     jpeg_start_compress(&cinfo, TRUE);
 
-    if ((text = pixGetText(pix)))
+        /* Cap the text the length limit, 65533, for JPEG_COM payload.
+         * Just to be safe, subtract 100 to cover the Adobe name space.  */
+    if ((text = pixGetText(pix)) != NULL) {
+        if (strlen(text) > 65433) {
+            L_WARNING("text is %lu bytes; clipping to 65433\n",
+                   procName, (unsigned long)strlen(text));
+            text[65433] = '\0';
+        }
         jpeg_write_marker(&cinfo, JPEG_COM, (const JOCTET *)text, strlen(text));
+    }
 
         /* Allocate row buffer */
     spp = cinfo.input_components;
@@ -1091,7 +1099,7 @@ FILE    *fp;
         return ERROR_INT("stream not opened", procName, 1);
     ret = pixWriteStreamJpeg(fp, pix, quality, progressive);
 #else
-    L_WARNING("work-around: writing to a temp file\n", procName);
+    L_INFO("work-around: writing to a temp file\n", procName);
   #ifdef _WIN32
     if ((fp = fopenWriteWinTempfile()) == NULL)
         return ERROR_INT("tmpfile stream not opened", procName, 1);

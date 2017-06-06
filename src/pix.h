@@ -70,6 +70,7 @@
  *
  *   (2) This file has definitions for:
  *         Colors for RGB
+ *         Colors for drawing boxes
  *         Perceptual color weights
  *         Colormap conversion flags
  *         Rasterop bit flags
@@ -212,6 +213,20 @@ static const l_int32  L_ALPHA_SHIFT =
 
 
 /*-------------------------------------------------------------------------*
+ *                       Colors for drawing boxes                          *
+ *-------------------------------------------------------------------------*/
+/*! Colors for drawing boxes */
+enum {
+    L_DRAW_RED = 0,         /*!< draw in red                   */
+    L_DRAW_GREEN = 1,       /*!< draw in green                 */
+    L_DRAW_BLUE = 2,        /*!< draw in blue                  */
+    L_DRAW_SPECIFIED = 3,   /*!< draw specified color          */
+    L_DRAW_RGB = 4,         /*!< draw as sequence of r,g,b     */
+    L_DRAW_RANDOM = 5       /*!< draw randomly chosen colors   */
+};
+
+
+/*-------------------------------------------------------------------------*
  *                       Perceptual color weights                          *
  *-------------------------------------------------------------------------*/
 /* <pre>
@@ -231,7 +246,6 @@ static const l_float32  L_BLUE_WEIGHT =  0.2;  /*!< Percept. weight for blue  */
 /*-------------------------------------------------------------------------*
  *                        Flags for colormap conversion                    *
  *-------------------------------------------------------------------------*/
-
 /*! Flags for colormap conversion */
 enum {
     REMOVE_CMAP_TO_BINARY = 0,     /*!< remove colormap for conv to 1 bpp  */
@@ -783,7 +797,7 @@ enum {
 
 
 /*-------------------------------------------------------------------------*
- *                     Color component selection flags                     *
+ *                    Color component selection flags                      *
  *-------------------------------------------------------------------------*/
 
 /*! Color component selection flags */
@@ -793,7 +807,9 @@ enum {
     L_SELECT_BLUE = 3,          /*!< use blue component                    */
     L_SELECT_MIN = 4,           /*!< use min color component               */
     L_SELECT_MAX = 5,           /*!< use max color component               */
-    L_SELECT_AVERAGE = 6        /*!< use average of color components       */
+    L_SELECT_AVERAGE = 6,       /*!< use average of color components       */
+    L_SELECT_HUE = 7,           /*!< use hue value (in HSV color space)    */
+    L_SELECT_SATURATION = 8     /*!< use saturation value (in HSV space)   */
 };
 
 
@@ -805,10 +821,11 @@ enum {
 enum {
     L_LS_BYTE = 1,              /*!< use LSB                               */
     L_MS_BYTE = 2,              /*!< use MSB                               */
-    L_CLIP_TO_FF = 3,           /*!< use max(val, 255)                     */
-    L_LS_TWO_BYTES = 4,         /*!< use two LSB                           */
-    L_MS_TWO_BYTES = 5,         /*!< use two MSB                           */
-    L_CLIP_TO_FFFF = 6          /*!< use max(val, 65535)                   */
+    L_AUTO_BYTE = 3,            /*!< use LSB if max(val) < 256; else MSB   */
+    L_CLIP_TO_FF = 4,           /*!< use max(val, 255)                     */
+    L_LS_TWO_BYTES = 5,         /*!< use two LSB                           */
+    L_MS_TWO_BYTES = 6,         /*!< use two MSB                           */
+    L_CLIP_TO_FFFF = 7          /*!< use max(val, 65535)                   */
 };
 
 

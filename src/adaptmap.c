@@ -1274,10 +1274,9 @@ PIX       *pixm, *pixt1, *pixt2, *pixt3, *pixims;
 
         /* Finally, for each connected region corresponding to the
          * fg mask, reset all pixels to their average value. */
-    if (pixim && fgpixels) {
+    if (pixim && fgpixels)
         pixSmoothConnectedRegions(pixm, pixims, 2);
-        pixDestroy(&pixims);
-    }
+    pixDestroy(&pixims);
 
     *ppixm = pixm;
     pixCopyResolution(*ppixm, pixs);
@@ -1821,7 +1820,7 @@ PIX     *pixd, *piximi, *pixim2, *pixims, *pixs2, *pixb, *pixt1, *pixt2, *pixt3;
  *
  * <pre>
  * Notes:
- *     (1) bgval should typically be \> 120 and \< 240
+ *     (1) bgval should typically be > 120 and < 240
  *     (2) pixd is a normalization image; the original image is
  *       multiplied by pixd and the result is divided by 256.
  * </pre>
@@ -1916,7 +1915,8 @@ PIX       *pixd;
     wpls = pixGetWpl(pixs);
     pixGetDimensions(pixs, &w, &h, NULL);
     pixGetDimensions(pixm, &wm, &hm, NULL);
-    pixd = pixCreateTemplate(pixs);
+    if ((pixd = pixCreateTemplate(pixs)) == NULL)
+        return (PIX *)ERROR_PTR("pixd not made", procName, NULL);
     datad = pixGetData(pixd);
     wpld = pixGetWpl(pixd);
     for (i = 0; i < hm; i++) {
@@ -1989,7 +1989,8 @@ PIX       *pixd;
     h = pixGetHeight(pixs);
     wm = pixGetWidth(pixmr);
     hm = pixGetHeight(pixmr);
-    pixd = pixCreateTemplate(pixs);
+    if ((pixd = pixCreateTemplate(pixs)) == NULL)
+        return (PIX *)ERROR_PTR("pixd not made", procName, NULL);
     datad = pixGetData(pixd);
     wpld = pixGetWpl(pixd);
     for (i = 0; i < hm; i++) {
@@ -2093,7 +2094,10 @@ PIX       *pixd;
         }
     }
 
-    pixd = pixCreateNoInit(w, h, 8);
+    if ((pixd = pixCreateNoInit(w, h, 8)) == NULL) {
+        LEPT_FREE(lut);
+        return (PIX *)ERROR_PTR("pixd not made", procName, NULL);
+    }
     pixCopyResolution(pixd, pixs);
     datad = pixGetData(pixd);
     wpld = pixGetWpl(pixd);
@@ -2124,7 +2128,7 @@ PIX       *pixd;
         }
     }
 
-    if (lut) LEPT_FREE(lut);
+    LEPT_FREE(lut);
     return pixd;
 }
 
@@ -2202,15 +2206,15 @@ PIXCMAP   *cmap;
     nar = numaGammaTRC(1.0, 0, L_MAX(1, 255 * rval / mapval));
     nag = numaGammaTRC(1.0, 0, L_MAX(1, 255 * gval / mapval));
     nab = numaGammaTRC(1.0, 0, L_MAX(1, 255 * bval / mapval));
-    if (!nar || !nag || !nab)
-        return (PIX *)ERROR_PTR("trc maps not all made", procName, pixd);
 
         /* Extract copies of the internal arrays */
     rarray = numaGetIArray(nar);
     garray = numaGetIArray(nag);
     barray = numaGetIArray(nab);
-    if (!rarray || !garray || !barray)
-        return (PIX *)ERROR_PTR("*arrays not all made", procName, pixd);
+    if (!nar || !nag || !nab || !rarray || !garray || !barray) {
+        L_ERROR("allocation failure in arrays\n", procName);
+        goto cleanup_arrays;
+    }
 
     if (cmap) {
         ncolors = pixcmapGetCount(cmap);
@@ -2231,6 +2235,7 @@ PIXCMAP   *cmap;
         }
     }
 
+cleanup_arrays:
     numaDestroy(&nar);
     numaDestroy(&nag);
     numaDestroy(&nab);
@@ -2836,7 +2841,8 @@ l_uint32  *data, *datamin, *datamax, *line, *tline, *linemin, *linemax;
     if (sx < 5 || sy < 5)
         return (PIX *)ERROR_PTR("sx and/or sy less than 5", procName, pixd);
 
-    pixd = pixCopy(pixd, pixs);
+    if ((pixd = pixCopy(pixd, pixs)) == NULL)
+        return (PIX *)ERROR_PTR("pixd not made", procName, NULL);
     iaa = (l_int32 **)LEPT_CALLOC(256, sizeof(l_int32 *));
     pixGetDimensions(pixd, &w, &h, NULL);
 

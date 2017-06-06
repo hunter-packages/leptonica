@@ -174,6 +174,8 @@ LEPT_DLL l_float32  AlphaMaskBorderVals[2] = {0.0, 0.5};
  *            * GET_DATA/SET_DATA: ~350 MPix/sec
  *          If speed is important and you're doing random access into
  *          the pix, use pixGetLinePtrs() and the array access macros.
+ *      (3) If the point is outside the image, this returns an error (1),
+ *          with 0 in %pval.  To avoid spamming output, it fails silently.
  * </pre>
  */
 l_int32
@@ -194,10 +196,8 @@ l_uint32  *line, *data;
         return ERROR_INT("pix not defined", procName, 1);
 
     pixGetDimensions(pix, &w, &h, &d);
-    if (x < 0 || x >= w)
-        return ERROR_INT("x out of bounds", procName, 1);
-    if (y < 0 || y >= h)
-        return ERROR_INT("y out of bounds", procName, 1);
+    if (x < 0 || x >= w || y < 0 || y >= h)
+        return 1;
 
     wpl = pixGetWpl(pix);
     data = pixGetData(pix);
@@ -243,7 +243,7 @@ l_uint32  *line, *data;
  * Notes:
  *      (1) Warning: the input value is not checked for overflow with respect
  *          the the depth of %pix, and the sign bit (if any) is ignored.
- *          * For d == 1, %val \> 0 sets the bit on.
+ *          * For d == 1, %val > 0 sets the bit on.
  *          * For d == 2, 4, 8 and 16, %val is masked to the maximum allowable
  *            pixel value, and any (invalid) higher order bits are discarded.
  *      (2) See pixGetPixel() for information on performance.
@@ -760,8 +760,8 @@ PIXCMAP  *cmap;
  * Notes:
  *      (1) N.B.  For all images, %grayval == 0 represents black and
  *          %grayval == 255 represents white.
- *      (2) For depth \< 8, we do our best to approximate the gray level.
- *          For 1 bpp images, any %grayval \< 128 is black; \>= 128 is white.
+ *      (2) For depth < 8, we do our best to approximate the gray level.
+ *          For 1 bpp images, any %grayval < 128 is black; >= 128 is white.
  *          For 32 bpp images, each r,g,b component is set to %grayval,
  *          and the alpha component is preserved.
  *      (3) If pix is colormapped, it adds the gray value, replicated in
@@ -842,10 +842,24 @@ PIXCMAP  *cmap;
  *
  * <pre>
  * Notes:
- *      (1) Caution!  For colormapped pix, %val is used as an index
+ *      (1) Caution 1!  For colormapped pix, %val is used as an index
  *          into a colormap.  Be sure that index refers to the intended color.
  *          If the color is not in the colormap, you should first add it
  *          and then call this function.
+ *      (2) Caution 2!  For 32 bpp pix, the interpretation of the LSB
+ *          of %val depends on whether spp == 3 (RGB) or spp == 4 (RGBA).
+ *          For RGB, the LSB is ignored in image transformations.
+ *          For RGBA, the LSB is interpreted as the alpha (transparency)
+ *          component; full transparency has alpha == 0x0, whereas
+ *          full opacity has alpha = 0xff.  An RGBA image with full
+ *          opacity behaves like an RGB image. 
+ *      (3) As an example of (2), suppose you want to initialize a 32 bpp
+ *          pix with partial opacity, say 0xee337788.  If the pix is 3 spp,
+ *          the 0x88 alpha component will be ignored and may be changed
+ *          in subsequent processing.  However, if the pix is 4 spp, the
+ *          alpha component will be retained and used. The function
+ *          pixCreate(w, h, 32) makes an RGB image by default, and
+ *          pixSetSpp(pix, 4) can be used to promote an RGB image to RGBA.
  * </pre>
  */
 l_int32
@@ -875,10 +889,13 @@ PIXCMAP   *cmap;
         /* Make sure val isn't too large for the pixel depth.
          * If it is too large, set the pixel color to white.  */
     pixGetDimensions(pix, &w, &h, &d);
-    maxval = (d == 32) ? 0xffffff00 : (1 << d) - 1;
-    if (val > maxval) {
-        L_WARNING("val too large for depth; using maxval\n", procName);
-        val = maxval;
+    if (d < 32) {
+        maxval = (1 << d) - 1;
+        if (val > maxval) {
+            L_WARNING("val = %d too large for depth; using maxval = %d\n",
+                      procName, val, maxval);
+            val = maxval;
+        }
     }
 
         /* Set up word to tile with */
@@ -1737,7 +1754,7 @@ pixAddBorder(PIX      *pixs,
  *          There are two ways to add the black or white border:
  *          (a) As done here (simplest, most efficient)
  *          (b) l_int32 ws, hs, d;
- *              pixGetDimensions(pixs, \&ws, \&hs, \&d);
+ *              pixGetDimensions(pixs, &ws, &hs, &d);
  *              Pix *pixd = pixCreate(ws + left + right, hs + top + bot, d);
  *              PixColormap *cmap = pixGetColormap(pixs);
  *              if (cmap != NULL)
@@ -1795,8 +1812,8 @@ l_uint32  val;
  *          which, if pixs is cmapped, may add an entry to the colormap.
  *          Alternatively, if pixs has a colormap, you can find the index
  *          of the pixel whose intensity is closest to white or black:
- *             white: pixcmapGetRankIntensity(cmap, 1.0, \&index);
- *             black: pixcmapGetRankIntensity(cmap, 0.0, \&index);
+ *             white: pixcmapGetRankIntensity(cmap, 1.0, &index);
+ *             black: pixcmapGetRankIntensity(cmap, 0.0, &index);
  *          and use that for val.
  * </pre>
  */
@@ -2688,9 +2705,9 @@ composeRGBAPixel(l_int32    rval,
  * <pre>
  * Notes:
  *      (1) A slower implementation uses macros:
- *             *prval = GET_DATA_BYTE(\&pixel, COLOR_RED);
- *             *pgval = GET_DATA_BYTE(\&pixel, COLOR_GREEN);
- *             *pbval = GET_DATA_BYTE(\&pixel, COLOR_BLUE);
+ *             *prval = GET_DATA_BYTE(&pixel, COLOR_RED);
+ *             *pgval = GET_DATA_BYTE(&pixel, COLOR_GREEN);
+ *             *pbval = GET_DATA_BYTE(&pixel, COLOR_BLUE);
  * </pre>
  */
 void
@@ -3186,7 +3203,7 @@ l_uint32  *rline, *rdata;  /* data in pix raster */
  *                       values are 255 (opaque); 0 otherwise
  * \return  0 if OK, 1 on error
  *      Notes:
- *          1) On error, opaque is returned as 0 (FALSE.
+ *          1) On error, opaque is returned as 0 (FALSE).
  */
 l_int32
 pixAlphaIsOpaque(PIX      *pix,
@@ -3242,10 +3259,10 @@ l_uint32  *data, *line;
  *      (2) After processing, you must call pixCleanupByteProcessing(),
  *          which frees the lineptr array and restores byte order.
  *      (3) Usage:
- *              l_uint8 **lineptrs = pixSetupByteProcessing(pix, \&w, \&h);
- *              for (i = 0; i \< h; i++) {
+ *              l_uint8 **lineptrs = pixSetupByteProcessing(pix, &w, &h);
+ *              for (i = 0; i < h; i++) {
  *                  l_uint8 *line = lineptrs[i];
- *                  for (j = 0; j \< w; j++) {
+ *                  for (j = 0; j < w; j++) {
  *                      val = line[j];
  *                      ...
  *                  }

@@ -148,7 +148,8 @@ LIBRARIAN_SHARED =	gcc -shared
 #  Links are created among the files <libname>.X.Y,
 #  <libname>.X, and <libname>, where Y is the minor revision number.
 MAJOR_REV = 1
-MINOR_REV = 73
+MINOR_REV = 74
+PATCH_REV = 2
 
 #########################################################
 
@@ -176,7 +177,7 @@ LEPTLIB_C =	adaptmap.c affine.c \
 		compare.c conncomp.c convertfiles.c \
 		convolve.c correlscore.c \
 		dewarp1.c dewarp2.c dewarp3.c dewarp4.c \
-		dnabasic.c dnahash.c \
+		dnabasic.c dnafunc1.c dnahash.c \
 		dwacomb.2.c dwacomblow.2.c \
 		edge.c encoding.c enhance.c \
 		fhmtauto.c fhmtgen.1.c fhmtgenlow.1.c \
@@ -216,10 +217,10 @@ LEPTLIB_C =	adaptmap.c affine.c \
 		seedfill.c seedfilllow.c \
 		sel1.c sel2.c selgen.c \
 		shear.c skew.c spixio.c \
-		stack.c stringcode.c sudoku.c \
+		stack.c stringcode.c \
+		strokes.c sudoku.c \
 		textops.c tiffio.c tiffiostub.c \
-		utils.c viewfiles.c \
-		warper.c watershed.c \
+		utils1.c utils2.c warper.c watershed.c \
 		webpio.c webpiostub.c writefile.c \
 		zlibmem.c zlibmemstub.c
 
@@ -304,9 +305,9 @@ $(LIB_DEBUG)/%.a:
 $(LIB_SHARED)/%.so:
 		$(RM) $@
 		$(LIBRARIAN_SHARED) $(SONAME_OPTION)$(notdir $@).$(MAJOR_REV) -o $@ $<
-	mv $@ $@.$(MAJOR_REV).$(MINOR_REV)
+	mv $@ $@.$(MAJOR_REV).$(MINOR_REV).$(PATCH_REV)
 	cd $(LIB_SHARED); rm $(notdir $@).$(MAJOR_REV); \
-	  ln -s $(notdir $@).$(MAJOR_REV).$(MINOR_REV) $(notdir $@).$(MAJOR_REV)
+	  ln -s $(notdir $@).$(MAJOR_REV).$(MINOR_REV).$(PATCH_REV) $(notdir $@).$(MAJOR_REV)
 	cd $(LIB_SHARED); rm $(notdir $@); \
 	  ln -s $(notdir $@).$(MAJOR_REV) $(notdir $@)
 
@@ -334,9 +335,9 @@ leptlibs:	$(LIB_SHARED)/$(LEPTLIB_SHARED)
 $(LIB_SHARED)/$(LEPTLIB_SHARED):	$(LEPTLIB_C:%.c=$(OBJ_SHARED)/%.o)
 		$(RM) $@
 		$(LIBRARIAN_SHARED) $(SONAME_OPTION)$(notdir $@).$(MAJOR_REV) -o $@ $(LEPTLIB_C:%.c=$(OBJ_SHARED)/%.o)
-	mv $@ $@.$(MAJOR_REV).$(MINOR_REV)
+	mv $@ $@.$(MAJOR_REV).$(MINOR_REV).$(PATCH_REV)
 	cd $(LIB_SHARED); rm $(notdir $@).$(MAJOR_REV); \
-	  ln -s $(notdir $@).$(MAJOR_REV).$(MINOR_REV) $(notdir $@).$(MAJOR_REV)
+	  ln -s $(notdir $@).$(MAJOR_REV).$(MINOR_REV).$(PATCH_REV) $(notdir $@).$(MAJOR_REV)
 	cd $(LIB_SHARED); rm $(notdir $@); \
 	  ln -s $(notdir $@).$(MAJOR_REV) $(notdir $@)
 

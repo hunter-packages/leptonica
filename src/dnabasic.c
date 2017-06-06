@@ -91,12 +91,6 @@
  *          l_int32      l_dnaaWrite()
  *          l_int32      l_dnaaWriteStream()
  *
- *      Other Dna functions
- *          L_DNA       *l_dnaMakeDelta()
- *          NUMA        *l_dnaConvertToNuma()
- *          L_DNA       *numaConvertToDna()
- *          l_int32     *l_dnaJoin()
- *
  *    (1) The Dna is a struct holding an array of doubles.  It can also
  *        be used to store l_int32 values, up to the full precision
  *        of int32.  Always use it whenever integers larger than a
@@ -122,13 +116,13 @@
  *           (a) return a l_float64 and cast it to an l_int32
  *           (b) cast the return directly to (l_float64 *) to
  *               satisfy the function prototype, as in
- *                 l_dnaGetDValue(da, index, (l_float64 *)\&ival);   [ugly!]
+ *                 l_dnaGetDValue(da, index, (l_float64 *)&ival);   [ugly!]
  *
- *    (4) int \<--\> double conversions:
+ *    (4) int <--> double conversions:
  *
- *        Conversions go automatically from l_int32 --\> l_float64,
+ *        Conversions go automatically from l_int32 --> l_float64,
  *        without loss of precision.  You must cast (l_int32)
- *        to go from l_float64 --\> l_int32 because you're truncating
+ *        to go from l_float64 --> l_int32 because you're truncating
  *        to the integer value.
  *
  *    (5) As with other arrays in leptonica, the l_dna has both an allocated
@@ -358,7 +352,7 @@ L_DNA  *da;
  *
  * <pre>
  * Notes:
- *      (1) This removes unused ptrs above da-\>n.
+ *      (1) This removes unused ptrs above da->n.
  * </pre>
  */
 L_DNA *
@@ -494,7 +488,7 @@ l_dnaExtendArray(L_DNA  *da)
  *
  * <pre>
  * Notes:
- *      (1) This shifts da[i] --\> da[i + 1] for all i \>= index,
+ *      (1) This shifts da[i] --> da[i + 1] for all i >= index,
  *          and then inserts val as da[index].
  *      (2) It should not be used repeatedly on large arrays,
  *          because the function is O(n).
@@ -535,7 +529,7 @@ l_int32  i, n;
  *
  * <pre>
  * Notes:
- *      (1) This shifts da[i] --\> da[i - 1] for all i \> index.
+ *      (1) This shifts da[i] --> da[i - 1] for all i > index.
  *      (2) It should not be used repeatedly on large arrays,
  *          because the function is O(n).
  * </pre>
@@ -618,10 +612,10 @@ l_dnaGetCount(L_DNA  *da)
  *
  * <pre>
  * Notes:
- *      (1) If newcount \<= da-\>nalloc, this resets da-\>n.
+ *      (1) If newcount <= da->nalloc, this resets da->n.
  *          Using newcount = 0 is equivalent to l_dnaEmpty().
- *      (2) If newcount \> da-\>nalloc, this causes a realloc
- *          to a size da-\>nalloc = newcount.
+ *      (2) If newcount > da->nalloc, this causes a realloc
+ *          to a size da->nalloc = newcount.
  *      (3) All the previously unused values in da are set to 0.0.
  * </pre>
  */
@@ -1674,139 +1668,3 @@ L_DNA   *da;
     return 0;
 }
 
-
-/*----------------------------------------------------------------------*
- *                         Other Dna functions                          *
- *----------------------------------------------------------------------*/
-/*!
- * \brief   l_dnaMakeDelta()
- *
- * \param[in]    das input l_dna
- * \return  dad of difference values val[i+1] - val[i],
- *                   or NULL on error
- */
-L_DNA *
-l_dnaMakeDelta(L_DNA  *das)
-{
-l_int32  i, n, prev, cur;
-L_DNA   *dad;
-
-    PROCNAME("l_dnaMakeDelta");
-
-    if (!das)
-        return (L_DNA *)ERROR_PTR("das not defined", procName, NULL);
-    n = l_dnaGetCount(das);
-    dad = l_dnaCreate(n - 1);
-    prev = 0;
-    for (i = 1; i < n; i++) {
-        l_dnaGetIValue(das, i, &cur);
-        l_dnaAddNumber(dad, cur - prev);
-        prev = cur;
-    }
-    return dad;
-}
-
-
-/*!
- * \brief   l_dnaConvertToNuma()
- *
- * \param[in]    da
- * \return  na, or NULL on error
- */
-NUMA *
-l_dnaConvertToNuma(L_DNA  *da)
-{
-l_int32    i, n;
-l_float64  val;
-NUMA      *na;
-
-    PROCNAME("l_dnaConvertToNuma");
-
-    if (!da)
-        return (NUMA *)ERROR_PTR("da not defined", procName, NULL);
-
-    n = l_dnaGetCount(da);
-    na = numaCreate(n);
-    for (i = 0; i < n; i++) {
-        l_dnaGetDValue(da, i, &val);
-        numaAddNumber(na, val);
-    }
-    return na;
-}
-
-
-/*!
- * \brief   numaConvertToDna
- *
- * \param[in]    na
- * \return  da, or NULL on error
- */
-L_DNA *
-numaConvertToDna(NUMA  *na)
-{
-l_int32    i, n;
-l_float32  val;
-L_DNA     *da;
-
-    PROCNAME("numaConvertToDna");
-
-    if (!na)
-        return (L_DNA *)ERROR_PTR("na not defined", procName, NULL);
-
-    n = numaGetCount(na);
-    da = l_dnaCreate(n);
-    for (i = 0; i < n; i++) {
-        numaGetFValue(na, i, &val);
-        l_dnaAddNumber(da, val);
-    }
-    return da;
-}
-
-
-/*!
- * \brief   l_dnaJoin()
- *
- * \param[in]    dad  dest dna; add to this one
- * \param[in]    das  [optional] source dna; add from this one
- * \param[in]    istart  starting index in das
- * \param[in]    iend  ending index in das; use -1 to cat all
- * \return  0 if OK, 1 on error
- *
- * <pre>
- * Notes:
- *      (1) istart \< 0 is taken to mean 'read from the start' (istart = 0)
- *      (2) iend \< 0 means 'read to the end'
- *      (3) if das == NULL, this is a no-op
- * </pre>
- */
-l_int32
-l_dnaJoin(L_DNA   *dad,
-          L_DNA   *das,
-          l_int32  istart,
-          l_int32  iend)
-{
-l_int32    n, i;
-l_float64  val;
-
-    PROCNAME("l_dnaJoin");
-
-    if (!dad)
-        return ERROR_INT("dad not defined", procName, 1);
-    if (!das)
-        return 0;
-
-    if (istart < 0)
-        istart = 0;
-    n = l_dnaGetCount(das);
-    if (iend < 0 || iend >= n)
-        iend = n - 1;
-    if (istart > iend)
-        return ERROR_INT("istart > iend; nothing to add", procName, 1);
-
-    for (i = istart; i <= iend; i++) {
-        l_dnaGetDValue(das, i, &val);
-        l_dnaAddNumber(dad, val);
-    }
-
-    return 0;
-}

@@ -95,7 +95,7 @@
  *     // Apply model to the input pixs
  *     Pix *pixd;
  *     dewarpaApplyDisparity(dewa, 214, pixs, 255, 0, 0, &pixd, NULL);
- *     pixDestroy(\&pixb);
+ *     pixDestroy(&pixb);
  * \endcode
  *
  *  Basic functioning to dewarp many pages:
@@ -412,6 +412,7 @@ static const l_int32     MIN_ARRAY_SAMPLING = 8;
 static const l_int32     DEFAULT_MIN_LINES = 15;
 static const l_int32     MIN_MIN_LINES = 4;
 static const l_int32     DEFAULT_MAX_REF_DIST = 16;
+static const l_int32     DEFAULT_USE_BOTH = TRUE;
 static const l_int32     DEFAULT_CHECK_COLUMNS = FALSE;
 
     /* Parameter values used in dewarpaSetCurvatures() */
@@ -521,8 +522,10 @@ L_DEWARP  *dew;
     pixDestroy(&dew->pixs);
     fpixDestroy(&dew->sampvdispar);
     fpixDestroy(&dew->samphdispar);
+    fpixDestroy(&dew->sampydispar);
     fpixDestroy(&dew->fullvdispar);
     fpixDestroy(&dew->fullhdispar);
+    fpixDestroy(&dew->fullydispar);
     numaDestroy(&dew->namidys);
     numaDestroy(&dew->nacurves);
     LEPT_FREE(dew);
@@ -621,6 +624,7 @@ L_DEWARPA  *dewa;
     dewa->max_edgecurv = DEFAULT_MAX_EDGECURV;
     dewa->max_diff_edgecurv = DEFAULT_MAX_DIFF_EDGECURV;
     dewa->check_columns = DEFAULT_CHECK_COLUMNS;
+    dewa->useboth = DEFAULT_USE_BOTH;
 
     return dewa;
 }
@@ -630,7 +634,7 @@ L_DEWARPA  *dewa;
  * \brief   dewarpaCreateFromPixacomp()
  *
  * \param[in]   pixac pixacomp of G4, 1 bpp images; with 1x1x1 placeholders
- * \param[in]   useboth 0 for vert disparity; 1 for both vert and horiz
+ * \param[in]   useboth 0 for only vert disparity; 1 for both vert and horiz
  * \param[in]   sampling use -1 or 0 for default value; otherwise minimum of 5
  * \param[in]   minlines minimum number of lines to accept; e.g., 10
  * \param[in]   maxdist for locating reference disparity; use -1 for default
@@ -1014,7 +1018,7 @@ dewarpaSetCurvatures(L_DEWARPA  *dewa,
  * \brief   dewarpaUseBothArrays()
  *
  * \param[in]    dewa
- * \param[in]    useboth 0 for false, 1 for true
+ * \param[in]    useboth   0 for false, 1 for true
  * \return  0 if OK, 1 on error
  *
  * <pre>
@@ -1053,12 +1057,14 @@ dewarpaUseBothArrays(L_DEWARPA  *dewa,
  *          'useboth' is set, this will count the number of text
  *          columns.  If the number is larger than 1, this will
  *          prevent the application of horizontal disparity arrays
- *          if they exist.
- *      (2) This field is set to 1 by default.  For horizontal disparity
- *          correction to take place, in addition to having a
- *          valid horizontal disparity array, 'useboth' must be 1,
- *          and if 'check_columns' is 1, there must be only one
- *          column of text.
+ *          if they exist.  Note that the default value of check_columns
+ *          if 0 (FALSE).
+ *      (2) This field is set to 0 by default.  For horizontal disparity
+ *          correction to take place on a single column of text, you must have:
+ *           - a valid horizontal disparity array
+ *           - useboth = 1 (TRUE)
+ *          If there are multiple columns, additionally
+ *           - check_columns = 0 (FALSE)
  * </pre>
  */
 l_int32
@@ -1401,7 +1407,7 @@ FILE    *fp;
         return ERROR_INT("stream not opened", procName, 1);
     ret = dewarpWriteStream(fp, dew);
 #else
-    L_WARNING("work-around: writing to a temp file\n", procName);
+    L_INFO("work-around: writing to a temp file\n", procName);
   #ifdef _WIN32
     if ((fp = fopenWriteWinTempfile()) == NULL)
         return ERROR_INT("tmpfile stream not opened", procName, 1);
@@ -1673,7 +1679,7 @@ FILE    *fp;
         return ERROR_INT("stream not opened", procName, 1);
     ret = dewarpaWriteStream(fp, dewa);
 #else
-    L_WARNING("work-around: writing to a temp file\n", procName);
+    L_INFO("work-around: writing to a temp file\n", procName);
   #ifdef _WIN32
     if ((fp = fopenWriteWinTempfile()) == NULL)
         return ERROR_INT("tmpfile stream not opened", procName, 1);

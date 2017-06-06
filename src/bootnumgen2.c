@@ -39,13 +39,14 @@
  *       L_STRCODE  *strc;
  *       strc = strcodeCreate(102);   // arbitrary integer
  *       strcodeGenerate(strc, "recog/digits/bootnum2.pa", "PIXA");
- *       strcodeFinalize(\&strc, ".");
+ *       strcodeFinalize(&strc, ".");
  *
  *   The two output files, autogen.102.c and autogen.102.h, were
  *   then slightly edited and merged into this file.
  *
  *   Call this way:
- *       Pixa  *pixa = (PIXA *)l_bootnum_gen2();
+ *       PIXA  *pixa = l_bootnum_gen2();   (C)
+ *       Pixa  *pixa = l_bootnum_gen2();   (C++)
  * </pre>
  */
 
@@ -260,7 +261,7 @@ static const char *l_bootnum2 =
 /*!
  * \brief   l_bootnum_gen2()
  *
- * \return   pixa  of labelled digits
+ * \return   pixa  of labeled digits
  *
  * <pre>
  * Call this way:
@@ -275,8 +276,6 @@ l_uint8  *data1, *data2;
 l_int32   size1;
 size_t    size2;
 PIXA     *pixa;
-
-    lept_mkdir("lept/auto");
 
         /* Unencode selected string, write to file, and read it */
     data1 = decodeBase64(l_bootnum2, strlen(l_bootnum2), &size1);

@@ -37,6 +37,8 @@
  *           NUMA     *boxaMakeSizeIndicator()
  *           BOXA     *boxaSelectByArea()
  *           NUMA     *boxaMakeAreaIndicator()
+ *           BOXA     *boxaSelectByWHRatio()
+ *           NUMA     *boxaMakeWHRatioIndicator()
  *           BOXA     *boxaSelectWithIndicator()
  *
  *      Boxa permutation
@@ -211,7 +213,7 @@ BOXAA   *baad;
  * Notes:
  *      (1) The args specify constraints on the size of the
  *          components that are kept.
- *      (2) Uses box clones in the new boxa.
+ *      (2) Uses box copies in the new boxa.
  *      (3) If the selection type is L_SELECT_WIDTH, the input
  *          height is ignored, and v.v.
  *      (4) To keep small components, use relation = L_SELECT_IF_LT or
@@ -233,6 +235,7 @@ NUMA  *na;
 
     PROCNAME("boxaSelectBySize");
 
+    if (pchanged) *pchanged = FALSE;
     if (!boxas)
         return (BOXA *)ERROR_PTR("boxas not defined", procName, NULL);
     if (boxaGetCount(boxas) == 0) {
@@ -245,7 +248,6 @@ NUMA  *na;
     if (relation != L_SELECT_IF_LT && relation != L_SELECT_IF_GT &&
         relation != L_SELECT_IF_LTE && relation != L_SELECT_IF_GTE)
         return (BOXA *)ERROR_PTR("invalid relation", procName, NULL);
-    if (pchanged) *pchanged = FALSE;
 
         /* Compute the indicator array for saving components */
     if ((na =
@@ -363,7 +365,7 @@ NUMA    *na;
  *
  * <pre>
  * Notes:
- *      (1) Uses box clones in the new boxa.
+ *      (1) Uses box copies in the new boxa.
  *      (2) To keep small components, use relation = L_SELECT_IF_LT or
  *          L_SELECT_IF_LTE.
  *          To keep large components, use relation = L_SELECT_IF_GT or
@@ -381,6 +383,7 @@ NUMA  *na;
 
     PROCNAME("boxaSelectByArea");
 
+    if (pchanged) *pchanged = FALSE;
     if (!boxas)
         return (BOXA *)ERROR_PTR("boxas not defined", procName, NULL);
     if (boxaGetCount(boxas) == 0) {
@@ -390,7 +393,6 @@ NUMA  *na;
     if (relation != L_SELECT_IF_LT && relation != L_SELECT_IF_GT &&
         relation != L_SELECT_IF_LTE && relation != L_SELECT_IF_GTE)
         return (BOXA *)ERROR_PTR("invalid relation", procName, NULL);
-    if (pchanged) *pchanged = FALSE;
 
         /* Compute the indicator array for saving components */
     na = boxaMakeAreaIndicator(boxas, area, relation);
@@ -456,6 +458,112 @@ NUMA    *na;
 
 
 /*!
+ * \brief   boxaSelectByWHRatio()
+ *
+ * \param[in]    boxas
+ * \param[in]    ratio    width/height threshold value
+ * \param[in]    relation L_SELECT_IF_LT, L_SELECT_IF_GT,
+ *                        L_SELECT_IF_LTE, L_SELECT_IF_GTE
+ * \param[out]   pchanged [optional] 1 if changed; 0 if clone returned
+ * \return  boxad filtered set, or NULL on error
+ *
+ * <pre>
+ * Notes:
+ *      (1) Uses box copies in the new boxa.
+ *      (2) To keep narrow components, use relation = L_SELECT_IF_LT or
+ *          L_SELECT_IF_LTE.
+ *          To keep wide components, use relation = L_SELECT_IF_GT or
+ *          L_SELECT_IF_GTE.
+ * </pre>
+ */
+BOXA *
+boxaSelectByWHRatio(BOXA      *boxas,
+                    l_float32  ratio,
+                    l_int32    relation,
+                    l_int32   *pchanged)
+{
+BOXA  *boxad;
+NUMA  *na;
+
+    PROCNAME("boxaSelectByWHRatio");
+
+    if (pchanged) *pchanged = FALSE;
+    if (!boxas)
+        return (BOXA *)ERROR_PTR("boxas not defined", procName, NULL);
+    if (boxaGetCount(boxas) == 0) {
+        L_WARNING("boxas is empty\n", procName);
+        return boxaCopy(boxas, L_COPY);
+    }
+    if (relation != L_SELECT_IF_LT && relation != L_SELECT_IF_GT &&
+        relation != L_SELECT_IF_LTE && relation != L_SELECT_IF_GTE)
+        return (BOXA *)ERROR_PTR("invalid relation", procName, NULL);
+
+        /* Compute the indicator array for saving components */
+    na = boxaMakeWHRatioIndicator(boxas, ratio, relation);
+
+        /* Filter to get output */
+    boxad = boxaSelectWithIndicator(boxas, na, pchanged);
+
+    numaDestroy(&na);
+    return boxad;
+}
+
+
+/*!
+ * \brief   boxaMakeWHRatioIndicator()
+ *
+ * \param[in]    boxa
+ * \param[in]    ratio    width/height threshold value
+ * \param[in]    relation L_SELECT_IF_LT, L_SELECT_IF_GT,
+ *                        L_SELECT_IF_LTE, L_SELECT_IF_GTE
+ * \return  na indicator array, or NULL on error
+ *
+ * <pre>
+ * Notes:
+ *      (1) To keep narrow components, use relation = L_SELECT_IF_LT or
+ *          L_SELECT_IF_LTE.
+ *          To keep wide components, use relation = L_SELECT_IF_GT or
+ *          L_SELECT_IF_GTE.
+ * </pre>
+ */
+NUMA *
+boxaMakeWHRatioIndicator(BOXA      *boxa,
+                         l_float32  ratio,
+                         l_int32    relation)
+{
+l_int32    i, n, w, h, ival;
+l_float32  whratio;
+NUMA      *na;
+
+    PROCNAME("boxaMakeWHRatioIndicator");
+
+    if (!boxa)
+        return (NUMA *)ERROR_PTR("boxa not defined", procName, NULL);
+    if ((n = boxaGetCount(boxa)) == 0)
+        return (NUMA *)ERROR_PTR("boxa is empty", procName, NULL);
+    if (relation != L_SELECT_IF_LT && relation != L_SELECT_IF_GT &&
+        relation != L_SELECT_IF_LTE && relation != L_SELECT_IF_GTE)
+        return (NUMA *)ERROR_PTR("invalid relation", procName, NULL);
+
+    na = numaCreate(n);
+    for (i = 0; i < n; i++) {
+        ival = 0;
+        boxaGetBoxGeometry(boxa, i, NULL, NULL, &w, &h);
+        whratio = (l_float32)w / (l_float32)h;
+
+        if ((relation == L_SELECT_IF_LT && whratio < ratio) ||
+            (relation == L_SELECT_IF_GT && whratio > ratio) ||
+            (relation == L_SELECT_IF_LTE && whratio <= ratio) ||
+            (relation == L_SELECT_IF_GTE && whratio >= ratio))
+            ival = 1;
+        numaAddNumber(na, ival);
+    }
+
+    return na;
+}
+
+
+/*!
  * \brief   boxaSelectWithIndicator()
  *
  * \param[in]    boxas
@@ -465,8 +573,8 @@ NUMA    *na;
  *
  * <pre>
  * Notes:
- *      (1) Returns a boxa clone if no components are removed.
- *      (2) Uses box clones in the new boxa.
+ *      (1) Returns a copy of the boxa if no components are removed.
+ *      (2) Uses box copies in the new boxa.
  *      (3) The indicator numa has values 0 (ignore) and 1 (accept).
  * </pre>
  */
@@ -481,6 +589,7 @@ BOXA    *boxad;
 
     PROCNAME("boxaSelectWithIndicator");
 
+    if (pchanged) *pchanged = FALSE;
     if (!boxas)
         return (BOXA *)ERROR_PTR("boxas not defined", procName, NULL);
     if (!na)
@@ -495,14 +604,14 @@ BOXA    *boxad;
 
     if (nsave == n) {
         if (pchanged) *pchanged = FALSE;
-        return boxaCopy(boxas, L_CLONE);
+        return boxaCopy(boxas, L_COPY);
     }
     if (pchanged) *pchanged = TRUE;
     boxad = boxaCreate(nsave);
     for (i = 0; i < n; i++) {
         numaGetIValue(na, i, &ival);
         if (ival == 0) continue;
-        box = boxaGetBox(boxas, i, L_CLONE);
+        box = boxaGetBox(boxas, i, L_COPY);
         boxaAddBox(boxad, box, L_INSERT);
     }
 
@@ -944,7 +1053,7 @@ BOXA    *boxae, *boxao, *boxalfe, *boxalfo, *boxame, *boxamo, *boxad;
  *          just do this:
  *              boxam = boxaWindowedMedian(boxas, halfwin, debug);
  *              boxad = boxaModifyWithBoxa(boxas, boxam, subflag, maxdiff);
- *              boxaDestroy(\&boxam);
+ *              boxaDestroy(&boxam);
  * </pre>
  */
 BOXA *
@@ -2189,9 +2298,9 @@ l_int32  i, n, x, y, w, h, xmax, ymax, xmin, ymin, found;
 
     if (!pw && !ph && !pbox)
         return ERROR_INT("no ptrs defined", procName, 1);
-    if (pbox) *pbox = NULL;
     if (pw) *pw = 0;
     if (ph) *ph = 0;
+    if (pbox) *pbox = NULL;
     if (!boxa)
         return ERROR_INT("boxa not defined", procName, 1);
 
@@ -2314,10 +2423,14 @@ BOXA    *boxa;
 
     PROCNAME("boxaaSizeRange");
 
-    if (!baa)
-        return ERROR_INT("baa not defined", procName, 1);
     if (!pminw && !pmaxw && !pminh && !pmaxh)
         return ERROR_INT("no data can be returned", procName, 1);
+    if (pminw) *pminw = 0;
+    if (pminh) *pminh = 0;
+    if (pmaxw) *pmaxw = 0;
+    if (pmaxh) *pmaxh = 0;
+    if (!baa)
+        return ERROR_INT("baa not defined", procName, 1);
 
     minw = minh = 100000000;
     maxw = maxh = 0;
@@ -2362,10 +2475,14 @@ l_int32  minw, minh, maxw, maxh, i, n, w, h;
 
     PROCNAME("boxaSizeRange");
 
-    if (!boxa)
-        return ERROR_INT("boxa not defined", procName, 1);
     if (!pminw && !pmaxw && !pminh && !pmaxh)
         return ERROR_INT("no data can be returned", procName, 1);
+    if (pminw) *pminw = 0;
+    if (pminh) *pminh = 0;
+    if (pmaxw) *pmaxw = 0;
+    if (pmaxh) *pmaxh = 0;
+    if (!boxa)
+        return ERROR_INT("boxa not defined", procName, 1);
 
     minw = minh = 100000000;
     maxw = maxh = 0;
@@ -2409,10 +2526,14 @@ l_int32  minx, miny, maxx, maxy, i, n, x, y;
 
     PROCNAME("boxaLocationRange");
 
-    if (!boxa)
-        return ERROR_INT("boxa not defined", procName, 1);
     if (!pminx && !pminy && !pmaxx && !pmaxy)
         return ERROR_INT("no data can be returned", procName, 1);
+    if (pminx) *pminx = 0;
+    if (pminy) *pminy = 0;
+    if (pmaxx) *pmaxx = 0;
+    if (pmaxy) *pmaxy = 0;
+    if (!boxa)
+        return ERROR_INT("boxa not defined", procName, 1);
 
     minx = miny = 100000000;
     maxx = maxy = 0;

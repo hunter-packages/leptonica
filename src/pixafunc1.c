@@ -41,6 +41,7 @@
  *           PIXA     *pixaSelectByAreaFraction()
  *           PIX      *pixSelectByWidthHeightRatio()
  *           PIXA     *pixaSelectByWidthHeightRatio()
+ *           PIXA     *pixaSelectByNumConnComp()
  *
  *           PIXA     *pixaSelectWithIndicator()
  *           l_int32   pixRemoveWithIndicator()
@@ -62,6 +63,7 @@
  *           PIXAA    *pixaaScaleToSize()
  *           PIXAA    *pixaaScaleToSizeVar()
  *           PIXA     *pixaScaleToSize()
+ *           PIXA     *pixaScaleToSizeRel()
  *           PIXA     *pixaScale()
  *
  *      Miscellaneous
@@ -70,6 +72,7 @@
  *           l_int32   pixaaSizeRange()
  *           l_int32   pixaSizeRange()
  *           PIXA     *pixaClipToPix()
+ *           PIXA     *pixaClipToForeground()
  *           l_int32   pixaGetRenderingDepth()
  *           l_int32   pixaHasColor()
  *           l_int32   pixaAnyColormaps()
@@ -77,6 +80,7 @@
  *           PIXA     *pixaConvertToSameDepth()
  *           l_int32   pixaEqual()
  *           PIXA     *pixaRotateOrth()
+ *           l_int32   pixaSetFullSizeBoxa()
  * </pre>
  */
 
@@ -935,6 +939,66 @@ PIXA  *pixad;
 
 
 /*!
+ * \brief   pixaSelectByNumConnComp()
+ *
+ * \param[in]    pixas
+ * \param[in]    nmin          minimum number of components
+ * \param[in]    nmax          maximum number of components
+ * \param[in]    connectivity  4 or 8
+ * \param[out]   pchanged [optional] 1 if changed; 0 if clone returned
+ * \return  pixad, or NULL on error
+ *
+ * <pre>
+ * Notes:
+ *      (1) Returns a pixa clone if no components are removed.
+ *      (2) Uses pix and box clones in the new pixa.
+ *      (3) This filters by the number of connected components in
+ *          a given range.
+ * </pre>
+ */
+PIXA *
+pixaSelectByNumConnComp(PIXA      *pixas,
+                        l_int32    nmin,
+                        l_int32    nmax,
+                        l_int32    connectivity,
+                        l_int32   *pchanged)
+{
+l_int32  n, i, count;
+NUMA    *na;
+PIX     *pix;
+PIXA    *pixad;
+
+    PROCNAME("pixaSelectByNumConnComp");
+
+    if (pchanged) *pchanged = 0;
+    if (!pixas)
+        return (PIXA *)ERROR_PTR("pixas not defined", procName, NULL);
+    if (nmin > nmax)
+        return (PIXA *)ERROR_PTR("nmin > nmax", procName, NULL);
+    if (connectivity != 4 && connectivity != 8)
+        return (PIXA *)ERROR_PTR("connectivity not 4 or 8", procName, NULL);
+
+        /* Get indicator array based on number of c.c. */
+    n = pixaGetCount(pixas);
+    na = numaCreate(n);
+    for (i = 0; i < n; i++) {
+        pix = pixaGetPix(pixas, i, L_CLONE);
+        pixCountConnComp(pix, connectivity, &count);
+        if (count >= nmin && count <= nmax)
+            numaAddNumber(na, 1);
+        else
+            numaAddNumber(na, 0);
+        pixDestroy(&pix);
+    }
+
+        /* Filter to get output */
+    pixad = pixaSelectWithIndicator(pixas, na, pchanged);
+    numaDestroy(&na);
+    return pixad;
+}
+
+
+/*!
  * \brief   pixaSelectWithIndicator()
  *
  * \param[in]    pixas
@@ -1249,7 +1313,10 @@ PIX     *pix;
  * Notes:
  *      (1) This sorts based on the data in the boxa.  If the boxa
  *          count is not the same as the pixa count, this returns an error.
- *      (2) The copyflag refers to the pix and box copies that are
+ *      (2) If the boxa is empty, it makes one corresponding to the
+ *          dimensions of each pix, which allows meaningful sorting on
+ *          all types except x and y.
+ *      (3) The copyflag refers to the pix and box copies that are
  *          inserted into the sorted pixa.  These are either L_COPY
  *          or L_CLONE.
  * </pre>
@@ -1261,7 +1328,7 @@ pixaSort(PIXA    *pixas,
          NUMA   **pnaindex,
          l_int32  copyflag)
 {
-l_int32  i, n, x, y, w, h;
+l_int32  i, n, nb, x, y, w, h;
 BOXA    *boxa;
 NUMA    *na, *naindex;
 PIXA    *pixad;
@@ -1284,10 +1351,22 @@ PIXA    *pixad;
     if (copyflag != L_COPY && copyflag != L_CLONE)
         return (PIXA *)ERROR_PTR("invalid copy flag", procName, NULL);
 
+        /* Check the pixa and boxa counts. Make a boxa if required. */
+    if ((n = pixaGetCount(pixas)) == 0) {
+        L_INFO("no pix in pixa\n", procName);
+        return pixaCopy(pixas, copyflag);
+    }
     if ((boxa = pixas->boxa) == NULL)   /* not owned; do not destroy */
-        return (PIXA *)ERROR_PTR("boxa not found", procName, NULL);
-    n = pixaGetCount(pixas);
-    if (boxaGetCount(boxa) != n)
+        return (PIXA *)ERROR_PTR("boxa not found!", procName, NULL);
+    nb = boxaGetCount(boxa);
+    if (nb == 0) {
+        pixaSetFullSizeBoxa(pixas);
+        nb = n;
+        boxa = pixas->boxa;  /* not owned */
+        if (sorttype == L_SORT_BY_X || sorttype == L_SORT_BY_Y)
+            L_WARNING("sort by x or y where all values are 0\n", procName);
+    }
+    if (nb != n)
         return (PIXA *)ERROR_PTR("boxa and pixa counts differ", procName, NULL);
 
         /* Use O(n) binsort if possible */
@@ -1786,8 +1865,9 @@ PIXA    *pixad;
 
     if (!pixas)
         return (PIXA *)ERROR_PTR("pixas not defined", procName, NULL);
-    if (wd <= 0 && hd <= 0)
-        return (PIXA *)ERROR_PTR("neither wd nor hd > 0", procName, NULL);
+
+    if (wd <= 0 && hd <= 0)  /* no scaling requested */
+        return pixaCopy(pixas, L_CLONE);
 
     n = pixaGetCount(pixas);
     pixad = pixaCreate(n);
@@ -1796,6 +1876,52 @@ PIXA    *pixad;
         pix2 = pixScaleToSize(pix1, wd, hd);
         pixCopyText(pix2, pix1);
         pixaAddPix(pixad, pix2, L_INSERT);
+        pixDestroy(&pix1);
+    }
+    return pixad;
+}
+
+
+/*!
+ * \brief   pixaScaleToSizeRel()
+ *
+ * \param[in]    pixas
+ * \param[in]    delw  change in width, in pixels; 0 means no change
+ * \param[in]    delh  change in height, in pixels; 0 means no change
+ * return  pixad, or NULL on error
+ *
+ * <pre>
+ * Notes:
+ *      (1) If a requested change in a pix is not possible because
+ *          either the requested width or height is <= 0, issue a
+ *          warning and return a copy.
+ * </pre>
+ */
+PIXA *
+pixaScaleToSizeRel(PIXA    *pixas,
+                   l_int32  delw,
+                   l_int32  delh)
+{
+l_int32  n, i;
+PIX     *pix1, *pix2;
+PIXA    *pixad;
+
+    PROCNAME("pixaScaleToSizeRel");
+
+    if (!pixas)
+        return (PIXA *)ERROR_PTR("pixas not defined", procName, NULL);
+
+    n = pixaGetCount(pixas);
+    pixad = pixaCreate(n);
+    for (i = 0; i < n; i++) {
+        pix1 = pixaGetPix(pixas, i, L_CLONE);
+        pix2 = pixScaleToSizeRel(pix1, delw, delh);
+        if (pix2) {
+            pixaAddPix(pixad, pix2, L_INSERT);
+        } else {
+            L_WARNING("relative scale to size failed; use a copy\n", procName);
+            pixaAddPix(pixad, pix1, L_COPY);
+        }
         pixDestroy(&pix1);
     }
     return pixad;
@@ -1878,8 +2004,8 @@ PIXA    *pixad;
  *             white:  val = 0xffffff00
  *             black:  val = 0
  *          For colormapped images, use 'index' found this way:
- *             white: pixcmapGetRankIntensity(cmap, 1.0, \&index);
- *             black: pixcmapGetRankIntensity(cmap, 0.0, \&index);
+ *             white: pixcmapGetRankIntensity(cmap, 1.0, &index);
+ *             black: pixcmapGetRankIntensity(cmap, 0.0, &index);
  *      (2) For in-place replacement of each pix with a bordered version,
  *          use %pixad = %pixas.  To make a new pixa, use %pixad = NULL.
  *      (3) In both cases, the boxa has sides adjusted as if it were
@@ -1953,7 +2079,7 @@ PIX     *pixs, *pixd;
  * Notes:
  *      (1) This 'flattens' the pixaa to a pixa, taking the pix in
  *          order in the first pixa, then the second, etc.
- *      (2) If \&naindex is defined, we generate a Numa that gives, for
+ *      (2) If &naindex is defined, we generate a Numa that gives, for
  *          each pix in the pixaa, the index of the pixa to which it belongs.
  * </pre>
  */
@@ -2167,6 +2293,60 @@ PIXA    *pixad;
     }
 
     return pixad;
+}
+
+
+/*!
+ * \brief   pixaClipToForeground()
+ *
+ * \param[in]    pixas
+ * \param[out]   ppixad   [optional] pixa of clipped pix returned
+ * \param[out]   pboxa    [optional] clipping boxes returned
+ * \return  0 if OK, 1 on error
+ *
+ * <pre>
+ * Notes:
+ *      (1) At least one of [&pixd, &boxa] must be specified.
+ *      (2) Any pix with no fg pixels is skipped.
+ *      (3) See pixClipToForeground().
+ * </pre>
+ */
+l_int32
+pixaClipToForeground(PIXA   *pixas,
+                     PIXA  **ppixad,
+                     BOXA  **pboxa)
+{
+l_int32  i, n;
+BOX     *box1;
+PIX     *pix1, *pix2;
+
+    PROCNAME("pixaClipToForeground");
+
+    if (ppixad) *ppixad = NULL;
+    if (pboxa) *pboxa = NULL;
+    if (!pixas)
+        return ERROR_INT("pixas not defined", procName, 1);
+    if (!ppixad && !pboxa)
+        return ERROR_INT("no output requested", procName, 1);
+
+    n = pixaGetCount(pixas);
+    if (ppixad) *ppixad = pixaCreate(n);
+    if (pboxa) *pboxa = boxaCreate(n);
+    for (i = 0; i < n; i++) {
+        pix1 = pixaGetPix(pixas, i, L_CLONE);
+        pixClipToForeground(pix1, &pix2, &box1);
+        pixDestroy(&pix1);
+        if (ppixad)
+            pixaAddPix(*ppixad, pix2, L_INSERT);
+        else
+            pixDestroy(&pix2);
+        if (pboxa)
+            boxaAddBox(*pboxa, box1, L_INSERT);
+        else
+            boxDestroy(&box1);
+    }
+
+    return 0;
 }
 
 
@@ -2544,3 +2724,47 @@ PIXA    *pixad;
 
     return pixad;
 }
+
+
+/*!
+ * \brief   pixaSetFullSizeBoxa()
+ *
+ * \param[in]    pixa
+ * \return  0 if OK, 1 on error
+ *
+ * <pre>
+ * Notes:
+ *      (1) Replaces the existing boxa.  Each box gives the dimensions
+ *          of the corresponding pix.  This is needed for functions
+ *          like pixaSort() that sort based on the boxes.
+ * </pre>
+ */
+l_int32
+pixaSetFullSizeBoxa(PIXA  *pixa)
+{
+l_int32  i, n, w, h;
+BOX     *box;
+BOXA    *boxa;
+PIX     *pix;
+
+    PROCNAME("pixaSetFullSizeBoxa");
+
+    if (!pixa)
+        return ERROR_INT("pixa not defined", procName, 1);
+    if ((n = pixaGetCount(pixa)) == 0) {
+        L_INFO("pixa contains no pix\n", procName);
+        return 0;
+    }
+
+    boxa = boxaCreate(n);
+    pixaSetBoxa(pixa, boxa, L_INSERT);
+    for (i = 0; i < n; i++) {
+        pix = pixaGetPix(pixa, i, L_CLONE);
+        pixGetDimensions(pix, &w, &h, NULL);
+        box = boxCreate(0, 0, w, h);
+        boxaAddBox(boxa, box, L_INSERT);
+        pixDestroy(&pix);
+    }
+    return 0;
+}
+

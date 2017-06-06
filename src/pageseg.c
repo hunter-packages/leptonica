@@ -32,7 +32,8 @@
  *          l_int32   pixGetRegionsBinary()
  *
  *      Halftone region extraction
- *          PIX      *pixGenHalftoneMask()
+ *          PIX      *pixGenHalftoneMask()    **Deprecated wrapper**
+ *          PIX      *pixGenerateHalftoneMask()
  *
  *      Textline extraction
  *          PIX      *pixGenTextlineMask()
@@ -49,6 +50,7 @@
  *
  *      Extraction of lines of text
  *          PIXA     *pixExtractTextlines()
+ *          PIXA     *pixExtractRawTextlines()
  *
  *      Decision text vs photo
  *          l_int32   pixDecideIfText()
@@ -59,6 +61,10 @@
  *
  *      Estimate the grayscale background value
  *          l_int32   pixEstimateBackground()
+ *
+ *      Largest white or black rectangles in an image
+ *          l_int32   pixFindLargeRectangles()
+ *          l_int32   pixFindLargestRectangle()
  * </pre>
  */
 
@@ -68,10 +74,6 @@
     /* These functions are not intended to work on very low-res images */
 static const l_int32  MinWidth = 100;
 static const l_int32  MinHeight = 100;
-
-#ifndef  NO_CONSOLE_IO
-#define  DEBUG_LINES     0
-#endif  /* ~NO_CONSOLE_IO */
 
 /*------------------------------------------------------------------*
  *                     Top level page segmentation                  *
@@ -83,23 +85,21 @@ static const l_int32  MinHeight = 100;
  * \param[out]   ppixhm [optional] halftone mask
  * \param[out]   ppixtm [optional] textline mask
  * \param[out]   ppixtb [optional] textblock mask
- * \param[in]    debug flag: set to 1 for debug output
+ * \param[in]    pixadb  input for collecting debug pix; use NULL to skip
  * \return  0 if OK, 1 on error
  *
  * <pre>
  * Notes:
  *      (1) It is best to deskew the image before segmenting.
- *      (2) The debug flag enables a number of outputs.  These
- *          are included to show how to generate and save/display
- *          these results.
+ *      (2) Passing in %pixadb enables debug output.
  * </pre>
  */
 l_int32
-pixGetRegionsBinary(PIX     *pixs,
-                    PIX    **ppixhm,
-                    PIX    **ppixtm,
-                    PIX    **ppixtb,
-                    l_int32  debug)
+pixGetRegionsBinary(PIX   *pixs,
+                    PIX  **ppixhm,
+                    PIX  **ppixtm,
+                    PIX  **ppixtb,
+                    PIXA  *pixadb)
 {
 l_int32  w, h, htfound, tlfound;
 PIX     *pixr, *pix1, *pix2;
@@ -128,16 +128,16 @@ PIX     *pixtb;    /* textblock mask */
 
         /* 2x reduce, to 150 -200 ppi */
     pixr = pixReduceRankBinaryCascade(pixs, 1, 0, 0, 0);
-    pixDisplayWrite(pixr, debug);
+    if (pixadb) pixaAddPix(pixadb, pixr, L_COPY);
 
         /* Get the halftone mask */
-    pixhm2 = pixGenHalftoneMask(pixr, &pixtext, &htfound, debug);
+    pixhm2 = pixGenerateHalftoneMask(pixr, &pixtext, &htfound, pixadb);
 
         /* Get the textline mask from the text pixels */
-    pixtm2 = pixGenTextlineMask(pixtext, &pixvws, &tlfound, debug);
+    pixtm2 = pixGenTextlineMask(pixtext, &pixvws, &tlfound, pixadb);
 
         /* Get the textblock mask from the textline mask */
-    pixtb2 = pixGenTextblockMask(pixtm2, pixvws, debug);
+    pixtb2 = pixGenTextblockMask(pixtm2, pixvws, pixadb);
     pixDestroy(&pixr);
     pixDestroy(&pixtext);
     pixDestroy(&pixvws);
@@ -147,7 +147,7 @@ PIX     *pixtb;    /* textblock mask */
     pixtbf2 = pixSelectBySize(pixtb2, 60, 60, 4, L_SELECT_IF_EITHER,
                               L_SELECT_IF_GTE, NULL);
     pixDestroy(&pixtb2);
-    pixDisplayWriteFormat(pixtbf2, debug, IFF_PNG);
+    if (pixadb) pixaAddPix(pixadb, pixtbf2, L_COPY);
 
         /* Expand all masks to full resolution, and do filling or
          * small dilations for better coverage. */
@@ -155,33 +155,32 @@ PIX     *pixtb;    /* textblock mask */
     pix1 = pixSeedfillBinary(NULL, pixhm, pixs, 8);
     pixOr(pixhm, pixhm, pix1);
     pixDestroy(&pix1);
-    pixDisplayWriteFormat(pixhm, debug, IFF_PNG);
+    if (pixadb) pixaAddPix(pixadb, pixhm, L_COPY);
 
     pix1 = pixExpandReplicate(pixtm2, 2);
     pixtm = pixDilateBrick(NULL, pix1, 3, 3);
     pixDestroy(&pix1);
-    pixDisplayWriteFormat(pixtm, debug, IFF_PNG);
+    if (pixadb) pixaAddPix(pixadb, pixtm, L_COPY);
 
     pix1 = pixExpandReplicate(pixtbf2, 2);
     pixtb = pixDilateBrick(NULL, pix1, 3, 3);
     pixDestroy(&pix1);
-    pixDisplayWriteFormat(pixtb, debug, IFF_PNG);
+    if (pixadb) pixaAddPix(pixadb, pixtb, L_COPY);
 
     pixDestroy(&pixhm2);
     pixDestroy(&pixtm2);
     pixDestroy(&pixtbf2);
 
         /* Debug: identify objects that are neither text nor halftone image */
-    if (debug) {
+    if (pixadb) {
         pix1 = pixSubtract(NULL, pixs, pixtm);  /* remove text pixels */
         pix2 = pixSubtract(NULL, pix1, pixhm);  /* remove halftone pixels */
-        pixDisplayWriteFormat(pix2, 1, IFF_PNG);
+        pixaAddPix(pixadb, pix2, L_INSERT);
         pixDestroy(&pix1);
-        pixDestroy(&pix2);
     }
 
         /* Debug: display textline components with random colors */
-    if (debug) {
+    if (pixadb) {
         l_int32  w, h;
         BOXA    *boxa;
         PIXA    *pixa;
@@ -189,41 +188,43 @@ PIX     *pixtb;    /* textblock mask */
         pixGetDimensions(pixtm, &w, &h, NULL);
         pix1 = pixaDisplayRandomCmap(pixa, w, h);
         pixcmapResetColor(pixGetColormap(pix1), 0, 255, 255, 255);
-        pixDisplay(pix1, 100, 100);
-        pixDisplayWriteFormat(pix1, 1, IFF_PNG);
+        pixaAddPix(pixadb, pix1, L_INSERT);
         pixaDestroy(&pixa);
         boxaDestroy(&boxa);
-        pixDestroy(&pix1);
     }
 
         /* Debug: identify the outlines of each textblock */
-    if (debug) {
+    if (pixadb) {
         PIXCMAP  *cmap;
         PTAA     *ptaa;
         ptaa = pixGetOuterBordersPtaa(pixtb);
-        lept_mkdir("pageseg");
-        ptaaWrite("/tmp/pageseg/tb_outlines.ptaa", ptaa, 1);
+        lept_mkdir("lept");
+        lept_mkdir("lept/pageseg");
+        ptaaWrite("/tmp/lept/pageseg/tb_outlines.ptaa", ptaa, 1);
         pix1 = pixRenderRandomCmapPtaa(pixtb, ptaa, 1, 16, 1);
         cmap = pixGetColormap(pix1);
         pixcmapResetColor(cmap, 0, 130, 130, 130);
-        pixDisplay(pix1, 500, 100);
-        pixDisplayWriteFormat(pix1, 1, IFF_PNG);
-        pixDestroy(&pix1);
+        pixaAddPix(pixadb, pix1, L_INSERT);
         ptaaDestroy(&ptaa);
     }
 
         /* Debug: get b.b. for all mask components */
-    if (debug) {
+    if (pixadb) {
         BOXA  *bahm, *batm, *batb;
         bahm = pixConnComp(pixhm, NULL, 4);
         batm = pixConnComp(pixtm, NULL, 4);
         batb = pixConnComp(pixtb, NULL, 4);
-        boxaWrite("/tmp/pageseg/htmask.boxa", bahm);
-        boxaWrite("/tmp/pageseg/textmask.boxa", batm);
-        boxaWrite("/tmp/pageseg/textblock.boxa", batb);
+        boxaWrite("/tmp/lept/pageseg/htmask.boxa", bahm);
+        boxaWrite("/tmp/lept/pageseg/textmask.boxa", batm);
+        boxaWrite("/tmp/lept/pageseg/textblock.boxa", batb);
         boxaDestroy(&bahm);
         boxaDestroy(&batm);
         boxaDestroy(&batb);
+    }
+    if (pixadb) {
+        pixaConvertToPdf(pixadb, 0, 1.0, 0, 0, "Debug page segmentation",
+                         "/tmp/lept/pageseg/debug.pdf");
+        L_INFO("Writing debug pdf to /tmp/lept/pageseg/debug.pdf\n", procName);
     }
 
     if (ppixhm)
@@ -249,10 +250,30 @@ PIX     *pixtb;    /* textblock mask */
 /*!
  * \brief   pixGenHalftoneMask()
  *
+ * <pre>
+ * Deprecated:
+ *   This wrapper avoids an ABI change with tesseract 3.0.4.
+ *   It should be removed when we no longer need to support 3.0.4.
+ *   The debug parameter is ignored (assumed 0).
+ * </pre>
+ */
+PIX *
+pixGenHalftoneMask(PIX      *pixs,
+                   PIX     **ppixtext,
+                   l_int32  *phtfound,
+                   l_int32   debug)
+{
+    return pixGenerateHalftoneMask(pixs, ppixtext, phtfound, NULL);
+}
+
+
+/*!
+ * \brief   pixGenerateHalftoneMask()
+ *
  * \param[in]    pixs 1 bpp, assumed to be 150 to 200 ppi
  * \param[out]   ppixtext [optional] text part of pixs
  * \param[out]   phtfound [optional] 1 if the mask is not empty
- * \param[in]    debug flag: 1 for debug output
+ * \param[in]    pixadb  input for collecting debug pix; use NULL to skip
  * \return  pixd halftone mask, or NULL on error
  *
  * <pre>
@@ -262,15 +283,15 @@ PIX     *pixtb;    /* textblock mask */
  * </pre>
  */
 PIX *
-pixGenHalftoneMask(PIX      *pixs,
-                   PIX     **ppixtext,
-                   l_int32  *phtfound,
-                   l_int32   debug)
+pixGenerateHalftoneMask(PIX      *pixs,
+                        PIX     **ppixtext,
+                        l_int32  *phtfound,
+                        PIXA     *pixadb)
 {
 l_int32  w, h, empty;
 PIX     *pix1, *pix2, *pixhs, *pixhm, *pixd;
 
-    PROCNAME("pixGenHalftoneMask");
+    PROCNAME("pixGenerateHalftoneMask");
 
     if (ppixtext) *ppixtext = NULL;
     if (phtfound) *phtfound = 0;
@@ -288,11 +309,11 @@ PIX     *pix1, *pix2, *pixhs, *pixhm, *pixd;
     pixhs = pixExpandReplicate(pix2, 8);  /* back to 2x reduction */
     pixDestroy(&pix1);
     pixDestroy(&pix2);
-    pixDisplayWriteFormat(pixhs, debug, IFF_PNG);
+    if (pixadb) pixaAddPix(pixadb, pixhs, L_COPY);
 
         /* Compute mask for connected regions */
     pixhm = pixCloseSafeBrick(NULL, pixs, 4, 4);
-    pixDisplayWriteFormat(pixhm, debug, IFF_PNG);
+    if (pixadb) pixaAddPix(pixadb, pixhm, L_COPY);
 
         /* Fill seed into mask to get halftone mask */
     pixd = pixSeedfillBinary(NULL, pixhs, pixhm, 4);
@@ -300,7 +321,6 @@ PIX     *pix1, *pix2, *pixhs, *pixhm, *pixd;
 #if 0
         /* Moderate opening to remove thin lines, etc. */
     pixOpenBrick(pixd, pixd, 10, 10);
-    pixDisplayWrite(pixd, debug);
 #endif
 
         /* Check if mask is empty */
@@ -314,7 +334,7 @@ PIX     *pix1, *pix2, *pixhs, *pixhm, *pixd;
             *ppixtext = pixCopy(NULL, pixs);
         else
             *ppixtext = pixSubtract(NULL, pixs, pixd);
-        pixDisplayWriteFormat(*ppixtext, debug, IFF_PNG);
+        if (pixadb) pixaAddPix(pixadb, *ppixtext, L_COPY);
     }
 
     pixDestroy(&pixhs);
@@ -332,7 +352,7 @@ PIX     *pix1, *pix2, *pixhs, *pixhm, *pixd;
  * \param[in]    pixs 1 bpp, assumed to be 150 to 200 ppi
  * \param[out]   ppixvws vertical whitespace mask
  * \param[out]   ptlfound [optional] 1 if the mask is not empty
- * \param[in]    debug flag: 1 for debug output
+ * \param[in]    pixadb  input for collecting debug pix; use NULL to skip
  * \return  pixd textline mask, or NULL on error
  *
  * <pre>
@@ -349,7 +369,7 @@ PIX *
 pixGenTextlineMask(PIX      *pixs,
                    PIX     **ppixvws,
                    l_int32  *ptlfound,
-                   l_int32   debug)
+                   PIXA     *pixadb)
 {
 l_int32  w, h, empty;
 PIX     *pix1, *pix2, *pixvws, *pixd;
@@ -380,7 +400,7 @@ PIX     *pix1, *pix2, *pixvws, *pixd;
          * textlines), and subtracting this from the bg. */
     pix2 = pixMorphCompSequence(pix1, "o80.60", 0);
     pixSubtract(pix1, pix1, pix2);
-    pixDisplayWriteFormat(pix1, debug, IFF_PNG);
+    if (pixadb) pixaAddPix(pixadb, pix1, L_COPY);
     pixDestroy(&pix2);
 
         /* Identify vertical whitespace by opening the remaining bg.
@@ -388,7 +408,7 @@ PIX     *pix1, *pix2, *pixvws, *pixd;
          * long vertical bg lines. */
     pixvws = pixMorphCompSequence(pix1, "o5.1 + o1.200", 0);
     *ppixvws = pixvws;
-    pixDisplayWriteFormat(pixvws, debug, IFF_PNG);
+    if (pixadb) pixaAddPix(pixadb, pixvws, L_COPY);
     pixDestroy(&pix1);
 
         /* Three steps to getting text line mask:
@@ -396,10 +416,10 @@ PIX     *pix1, *pix2, *pixvws, *pixd;
          *   (2) open the vertical whitespace corridors back up
          *   (3) small opening to remove noise    */
     pix1 = pixCloseSafeBrick(NULL, pixs, 30, 1);
-    pixDisplayWrite(pix1, debug);
+    if (pixadb) pixaAddPix(pixadb, pix1, L_COPY);
     pixd = pixSubtract(NULL, pix1, pixvws);
     pixOpenBrick(pixd, pixd, 3, 3);
-    pixDisplayWriteFormat(pixd, debug, IFF_PNG);
+    if (pixadb) pixaAddPix(pixadb, pixd, L_COPY);
     pixDestroy(&pix1);
 
         /* Check if text line mask is empty */
@@ -421,7 +441,7 @@ PIX     *pix1, *pix2, *pixvws, *pixd;
  *
  * \param[in]    pixs 1 bpp, textline mask, assumed to be 150 to 200 ppi
  * \param[in]    pixvws vertical white space mask
- * \param[in]    debug flag: 1 for debug output
+ * \param[in]    pixadb  input for collecting debug pix; use NULL to skip
  * \return  pixd textblock mask, or NULL on error
  *
  * <pre>
@@ -438,9 +458,9 @@ PIX     *pix1, *pix2, *pixvws, *pixd;
  * </pre>
  */
 PIX *
-pixGenTextblockMask(PIX     *pixs,
-                    PIX     *pixvws,
-                    l_int32  debug)
+pixGenTextblockMask(PIX   *pixs,
+                    PIX   *pixvws,
+                    PIXA  *pixadb)
 {
 l_int32  w, h;
 PIX     *pix1, *pix2, *pix3, *pixd;
@@ -459,7 +479,7 @@ PIX     *pix1, *pix2, *pix3, *pixd;
 
         /* Join pixels vertically to make a textblock mask */
     pix1 = pixMorphSequence(pixs, "c1.10 + o4.1", 0);
-    pixDisplayWriteFormat(pix1, debug, IFF_PNG);
+    if (pixadb) pixaAddPix(pixadb, pix1, L_COPY);
 
         /* Solidify the textblock mask and remove noise:
          *   (1) For each cc, close the blocks and dilate slightly
@@ -469,12 +489,12 @@ PIX     *pix1, *pix2, *pix3, *pixd;
          *   (4) Remove small components. */
     pix2 = pixMorphSequenceByComponent(pix1, "c30.30 + d3.3", 8, 0, 0, NULL);
     pixCloseSafeBrick(pix2, pix2, 10, 1);
-    pixDisplayWriteFormat(pix2, debug, IFF_PNG);
+    if (pixadb) pixaAddPix(pixadb, pix2, L_COPY);
     pix3 = pixSubtract(NULL, pix2, pixvws);
-    pixDisplayWriteFormat(pix3, debug, IFF_PNG);
+    if (pixadb) pixaAddPix(pixadb, pix3, L_COPY);
     pixd = pixSelectBySize(pix3, 25, 5, 8, L_SELECT_IF_BOTH,
                             L_SELECT_IF_GTE, NULL);
-    pixDisplayWriteFormat(pixd, debug, IFF_PNG);
+    if (pixadb) pixaAddPix(pixadb, pixd, L_COPY);
 
     pixDestroy(&pix1);
     pixDestroy(&pix2);
@@ -521,11 +541,11 @@ PIX     *pix1, *pix2, *pix3, *pixd;
  *          dimensions of pixs must be at least MinWidth x MinHeight.
  *      (4) If you want pdf output of results when called repeatedly,
  *          the pagenum arg labels the images written, which go into
- *          /tmp/lept/\<pdfdir\>/\<pagenum\>.png.  In that case,
+ *          /tmp/lept/<pdfdir>/<pagenum>.png.  In that case,
  *          you would clean out the /tmp directory before calling this
  *          function on each page:
- *              lept_rmdir("/lept/\<pdfdir\>");
- *              lept_mkdir("/lept/\<pdfdir\>");
+ *              lept_rmdir("/lept/<pdfdir>");
+ *              lept_mkdir("/lept/<pdfdir>");
  * </pre>
  */
 BOX *
@@ -561,7 +581,7 @@ BOXA    *ba1, *ba2;
          * one seed pixel.  Also clear out any components that are within
          * 10 pixels of the edge at 2x reduction. */
     flag = (showmorph) ? -1 : 0;  /* if showmorph == -1, write intermediate
-                                   * images to /tmp/seq_output_1.pdf */
+                                   * images to /tmp/lept/seq_output_1.pdf */
     pixb = pixConvertTo1(pixs, threshold);
     pixb2 = pixScale(pixb, 0.5, 0.5);
     pixseed = pixMorphSequence(pixb2, "o1.2 + c9.9 + o3.5", flag);
@@ -576,7 +596,8 @@ BOXA    *ba1, *ba2;
          * and close enough to the edge.  For each edge, if the block
          * is more than mindist from that edge, then clean 'erasedist'
          * pixels from the edge. */
-    pix1 = pixMorphSequence(pixm, "c50.50", flag - 1);
+    if (flag == -1) flag = -2;  /* write a pdf to /tmp/lept/seq_output_2.pdf */
+    pix1 = pixMorphSequence(pixm, "c50.50", flag);
     ba1 = pixConnComp(pix1, NULL, 8);
     ba2 = boxaSort(ba1, L_SORT_BY_AREA, L_SORT_DECREASING, NULL);
     pixGetDimensions(pix1, &w, &h, NULL);
@@ -888,29 +909,43 @@ PIX      *pix1, *pixdb;
  * \param[in]    maxw, maxh initial filtering: remove any components in pixs
  *                          with components larger than maxw or maxh
  * \param[in]    minw, minh final filtering: remove extracted 'lines'
- *                          with sizes smaller than minw or minh
+ *                          with sizes smaller than minw or minh; use
+ *                          0 for default.
+ * \param[in]    adjw, adjh final adjustment of boxes representing each
+ *                          text line.  If > 0, these increase the box
+ *                          size at each edge by this amount.
+ * \param[in]    pixadb     pixa for saving intermediate steps; NULL to omit
  * \return  pixa of textline images, including bounding boxes, or
  *                    NULL on error
  *
  * <pre>
  * Notes:
- *      (1) This first removes components from pixs that are either
- *          wide (\> %maxw) or tall (\> %maxh).
- *      (2) This function assumes that textlines have sufficient
+ *      (1) This function assumes that textline fragments have sufficient
  *          vertical separation and small enough skew so that a
  *          horizontal dilation sufficient to join words will not join
- *          textlines.  Images with multiple columns of text may have
- *          the textlines join across the space between columns.
- *      (3) A final filtering operation removes small components, such
- *          that width \< %minw or height \< %minh.
- *      (4) For reasonable accuracy, the resolution of pixs should be
+ *          textlines.  It does not guarantee that horizontally adjacent
+ *          textline fragments on the same line will be joined.
+ *      (2) For images with multiple columns, it attempts to avoid joining
+ *          textlines across the space between columns.  If that is not
+ *          a concern, you can also use pixExtractRawTextlines(),
+ *          which will join them with alacrity.
+ *      (3) This first removes components from pixs that are either
+ *          wide (> %maxw) or tall (> %maxh).
+ *      (4) A final filtering operation removes small components, such
+ *          that width < %minw or height < %minh.
+ *      (5) For reasonable accuracy, the resolution of pixs should be
  *          at least 100 ppi.  For reasonable efficiency, the resolution
  *          should not exceed 600 ppi.
- *      (5) This can be used to determine if some region of a scanned
+ *      (6) This can be used to determine if some region of a scanned
  *          image is horizontal text.
- *      (6) As an example, for a pix with resolution 300 ppi, a reasonable
+ *      (7) As an example, for a pix with resolution 300 ppi, a reasonable
  *          set of parameters is:
- *             pixExtractTextlines(pix, 150, 150, 10, 5);
+ *             pixExtractTextlines(pix, 150, 150, 36, 20, 5, 5, NULL);
+ *          The defaults minw and minh for 300 ppi are about 36 and 20,
+ *          so the same result is obtained with:
+ *             pixExtractTextlines(pix, 150, 150, 0, 0, 5, 5, NULL);
+ *      (8) The output pixa is composed of subimages, one for each textline,
+ *          and the boxa in the pixa tells where in %pixs each textline goes.
  * </pre>
  */
 PIXA *
@@ -918,14 +953,16 @@ pixExtractTextlines(PIX     *pixs,
                     l_int32  maxw,
                     l_int32  maxh,
                     l_int32  minw,
-                    l_int32  minh)
+                    l_int32  minh,
+                    l_int32  adjw,
+                    l_int32  adjh,
+                    PIXA    *pixadb)
 {
 char     buf[64];
-l_int32  i, n, res, csize, empty;
-BOX     *box;
-BOXA    *boxa1, *boxa2;
-PIX     *pix1, *pix2, *pix3, *pix4, *pix5;
-PIXA    *pixa1, *pixa2, *pixa3, *pixad;
+l_int32  res, csize, empty;
+BOXA    *boxa1, *boxa2, *boxa3;
+PIX     *pix1, *pix2, *pix3;
+PIXA    *pixa1, *pixa2, *pixa3;
 
     PROCNAME("pixExtractTextlines");
 
@@ -948,10 +985,12 @@ PIXA    *pixa1, *pixa2, *pixa3, *pixad;
         L_INFO("no fg pixels in input image\n", procName);
         return NULL;
     }
+    if (pixadb) pixaAddPix(pixadb, pix1, L_COPY);
 
         /* Remove any very tall or very wide connected components */
     pix2 = pixSelectBySize(pix1, maxw, maxh, 8, L_SELECT_IF_BOTH,
                            L_SELECT_IF_LT, NULL);
+    if (pixadb) pixaAddPix(pixadb, pix2, L_COPY);
     pixDestroy(&pix1);
 
         /* Filter to solidify the text lines within the x-height region.
@@ -962,46 +1001,185 @@ PIXA    *pixa1, *pixa2, *pixa3, *pixad;
         res = 300;
     }
     csize = L_MIN(120., 60.0 * res / 300.0);
-    snprintf(buf, sizeof(buf), "c%d.1 + o20.1", csize);
+    snprintf(buf, sizeof(buf), "c%d.1 + o%d.1", csize, csize / 3);
     pix3 = pixMorphCompSequence(pix2, buf, 0);
+    if (pixadb) pixaAddPix(pixadb, pix3, L_COPY);
 
         /* Extract the connected components.  These should be dilated lines */
     boxa1 = pixConnComp(pix3, &pixa1, 4);
-    pixDestroy(&pix3);
+    if (pixadb) {
+        pix1 = pixaDisplayRandomCmap(pixa1, 0, 0);
+        pixcmapResetColor(pixGetColormap(pix1), 0, 255, 255, 255);
+        pixaAddPix(pixadb, pix1, L_INSERT);
+    }
+
+        /* Set minw, minh if default is requested */
+    minw = (minw != 0) ? minw : (l_int32)(0.12 * res);
+    minh = (minh != 0) ? minh : (l_int32)(0.07 * res);
 
         /* Remove line components that are too small */
     pixa2 = pixaSelectBySize(pixa1, minw, minh, L_SELECT_IF_BOTH,
                            L_SELECT_IF_GTE, NULL);
-
-#if DEBUG_LINES
-    pix1 = pixaDisplayRandomCmap(pixa2, 0, 0);
-    pixcmapResetColor(pixGetColormap(pix1), 0, 255, 255, 255);
-    pixWrite("/tmp/lept/junklines.png", pix1, IFF_PNG);
-    pixDestroy(&pix1);
-#endif
+    if (pixadb) {
+        pix1 = pixaDisplayRandomCmap(pixa2, 0, 0);
+        pixcmapResetColor(pixGetColormap(pix1), 0, 255, 255, 255);
+        pixaAddPix(pixadb, pix1, L_INSERT);
+        pix1 = pixConvertTo32(pix2);
+        pixRenderBoxaArb(pix1, pixa2->boxa, 2, 255, 0, 0);
+        pixaAddPix(pixadb, pix1, L_INSERT);
+    }
 
         /* Selectively AND with the version before dilation, and save */
     boxa2 = pixaGetBoxa(pixa2, L_CLONE);
-    n = boxaGetCount(boxa2);
-    pixa3 = pixClipRectangles(pix2, boxa2);
-    pixad = pixaCreate(n);
-    for (i = 0; i < n; i++) {
-        pix4 = pixaGetPix(pixa2, i, L_CLONE);
-        pix5 = pixaGetPix(pixa3, i, L_COPY);
-        pixAnd(pix5, pix5, pix4);
-        pixaAddPix(pixad, pix5, L_INSERT);
-        box = boxaGetBox(boxa2, i, L_COPY);
-        pixaAddBox(pixad, box, L_INSERT);
-        pixDestroy(&pix4);
+    boxa3 = boxaAdjustSides(boxa2, -adjw, adjw, -adjh, adjh);
+    pixa3 = pixClipRectangles(pix2, boxa3);
+    if (pixadb) {
+        pix1 = pixaDisplayRandomCmap(pixa3, 0, 0);
+        pixcmapResetColor(pixGetColormap(pix1), 0, 255, 255, 255);
+        pixaAddPix(pixadb, pix1, L_INSERT);
     }
 
     pixDestroy(&pix2);
+    pixDestroy(&pix3);
     pixaDestroy(&pixa1);
     pixaDestroy(&pixa2);
-    pixaDestroy(&pixa3);
     boxaDestroy(&boxa1);
     boxaDestroy(&boxa2);
-    return pixad;
+    boxaDestroy(&boxa3);
+    return pixa3;
+}
+
+
+/*!
+ * \brief   pixExtractRawTextlines()
+ *
+ * \param[in]    pixs any depth, assumed to have nearly horizontal text
+ * \param[in]    maxw, maxh initial filtering: remove any components in pixs
+ *                          with components larger than maxw or maxh
+ * \param[in]    adjw, adjh final adjustment of boxes representing each
+ *                          text line.  If > 0, these increase the box
+ *                          size at each edge by this amount.
+ * \param[in]    pixadb     pixa for saving intermediate steps; NULL to omit
+ * \return  pixa of textline images, including bounding boxes, or
+ *                    NULL on error
+ *
+ * <pre>
+ * Notes:
+ *      (1) This function assumes that textlines have sufficient
+ *          vertical separation and small enough skew so that a
+ *          horizontal dilation sufficient to join words will not join
+ *          textlines.  It aggressively joins textlines across multiple
+ *          columns, so if that is not desired, you must either (a) make
+ *          sure that %pixs is a single column of text or (b) use instead
+ *          pixExtractTextlines(), which is more conservative
+ *          about joining text fragments that have vertical overlap.
+ *      (2) This first removes components from pixs that are either
+ *          very wide (> %maxw) or very tall (> %maxh).
+ *      (3) For reasonable accuracy, the resolution of pixs should be
+ *          at least 100 ppi.  For reasonable efficiency, the resolution
+ *          should not exceed 600 ppi.
+ *      (4) This can be used to determine if some region of a scanned
+ *          image is horizontal text.
+ *      (5) As an example, for a pix with resolution 300 ppi, a reasonable
+ *          set of parameters is:
+ *             pixExtractRawTextlines(pix, 150, 150, 0, 0, NULL);
+ *      (6) The output pixa is composed of subimages, one for each textline,
+ *          and the boxa in the pixa tells where in %pixs each textline goes.
+ * </pre>
+ */
+PIXA *
+pixExtractRawTextlines(PIX     *pixs,
+                       l_int32  maxw,
+                       l_int32  maxh,
+                       l_int32  adjw,
+                       l_int32  adjh,
+                       PIXA    *pixadb)
+{
+char     buf[64];
+l_int32  i, n, res, csize, empty;
+BOX     *box;
+BOXA    *boxa1, *boxa2, *boxa3;
+BOXAA   *baa1;
+PIX     *pix1, *pix2, *pix3, *pix4, *pix5;
+PIXA    *pixa1, *pixa2;
+
+    PROCNAME("pixExtractRawTextlines");
+
+    if (!pixs)
+        return (PIXA *)ERROR_PTR("pixs not defined", procName, NULL);
+
+        /* Binarize carefully, if necessary */
+    if (pixGetDepth(pixs) > 1) {
+        pix2 = pixConvertTo8(pixs, FALSE);
+        pix3 = pixCleanBackgroundToWhite(pix2, NULL, NULL, 1.0, 70, 190);
+        pix1 = pixThresholdToBinary(pix3, 150);
+        pixDestroy(&pix2);
+        pixDestroy(&pix3);
+    } else {
+        pix1 = pixClone(pixs);
+    }
+    pixZero(pix1, &empty);
+    if (empty) {
+        pixDestroy(&pix1);
+        L_INFO("no fg pixels in input image\n", procName);
+        return NULL;
+    }
+    if (pixadb) pixaAddPix(pixadb, pix1, L_COPY);
+
+        /* Remove any very tall or very wide connected components */
+    pix2 = pixSelectBySize(pix1, maxw, maxh, 8, L_SELECT_IF_BOTH,
+                           L_SELECT_IF_LT, NULL);
+    if (pixadb) pixaAddPix(pixadb, pix2, L_COPY);
+    pixDestroy(&pix1);
+
+        /* Filter to solidify the text lines within the x-height region.
+         * The closing (csize) bridges gaps between words. */
+    if ((res = pixGetXRes(pixs)) == 0) {
+        L_INFO("Resolution is not set: setting to 300 ppi\n", procName);
+        res = 300;
+    }
+    csize = L_MIN(120., 60.0 * res / 300.0);
+    snprintf(buf, sizeof(buf), "c%d.1", csize);
+    pix3 = pixMorphCompSequence(pix2, buf, 0);
+    if (pixadb) pixaAddPix(pixadb, pix3, L_COPY);
+
+        /* Extract the connected components.  These should be dilated lines */
+    boxa1 = pixConnComp(pix3, &pixa1, 4);
+    if (pixadb) {
+        pix1 = pixaDisplayRandomCmap(pixa1, 0, 0);
+        pixcmapResetColor(pixGetColormap(pix1), 0, 255, 255, 255);
+        pixaAddPix(pixadb, pix1, L_INSERT);
+    }
+
+        /* Do a 2-d sort, and generate a bounding box for each set of text
+         * line segments that is aligned horizontally (i.e., has vertical
+         * overlap) into a box representing a single text line. */
+    baa1 = boxaSort2d(boxa1, NULL, -1, -1, 5);
+    boxaaGetExtent(baa1, NULL, NULL, NULL, &boxa2);
+    if (pixadb) {
+        pix1 = pixConvertTo32(pix2);
+        pixRenderBoxaArb(pix1, boxa2, 2, 255, 0, 0);
+        pixaAddPix(pixadb, pix1, L_INSERT);
+    }
+
+        /* Optionally adjust the sides of each text line box, and then
+         * use the boxes to generate a pixa of the text lines. */
+    boxa3 = boxaAdjustSides(boxa2, -adjw, adjw, -adjh, adjh);
+    pixa2 = pixClipRectangles(pix2, boxa3);
+    if (pixadb) {
+        pix1 = pixaDisplayRandomCmap(pixa2, 0, 0);
+        pixcmapResetColor(pixGetColormap(pix1), 0, 255, 255, 255);
+        pixaAddPix(pixadb, pix1, L_INSERT);
+    }
+
+    pixDestroy(&pix2);
+    pixDestroy(&pix3);
+    pixaDestroy(&pixa1);
+    boxaDestroy(&boxa1);
+    boxaDestroy(&boxa2);
+    boxaDestroy(&boxa3);
+    boxaaDestroy(&baa1);
+    return pixa2;
 }
 
 
@@ -1328,8 +1506,6 @@ PIX       *pix1, *pix2, *pix3, *pix4, *pix5;
 
     PROCNAME("pixCountTextColumns");
 
-    lept_mkdir("lept");
-
     if (!pncols)
         return ERROR_INT("&ncols not defined", procName, 1);
     *pncols = -1;  /* init */
@@ -1449,7 +1625,7 @@ PIX       *pix1, *pix2, *pix3, *pix4, *pix5;
  *
  * <pre>
  * Notes:
- *      (1) Caller should check that return bg value is \> 0.
+ *      (1) Caller should check that return bg value is > 0.
  * </pre>
  */
 l_int32
@@ -1474,10 +1650,10 @@ PIX       *pix1, *pix2, *pixm;
         return ERROR_INT("edgecrop not in [0.0 ... 1.0)", procName, 1);
 
     pix1 = pixRemoveColormap(pixs, REMOVE_CMAP_TO_GRAYSCALE);
+    pixGetDimensions(pix1, &w, &h, NULL);
 
         /* Optionally crop inner part of image */
     if (edgecrop > 0.0) {
-        pixGetDimensions(pix1, &w, &h, NULL);
         box = boxCreate(0.5 * edgecrop * w, 0.5 * edgecrop * h,
                         (1.0 - edgecrop) * w, (1.0 - edgecrop) * h);
         pix2 = pixClipRectangle(pix1, box, NULL);
@@ -1501,5 +1677,254 @@ PIX       *pix1, *pix2, *pixm;
     pixDestroy(&pix1);
     pixDestroy(&pix2);
     pixDestroy(&pixm);
+    return 0;
+}
+
+
+/*---------------------------------------------------------------------*
+ *             Largest white or black rectangles in an image           *
+ *---------------------------------------------------------------------*/
+/*!
+ * \brief   pixFindLargeRectangles()
+ *
+ * \param[in]    pixs       1 bpp
+ * \param[in]    polarity   0 within background, 1 within foreground
+ * \param[in]    nrect      number of rectangles to be found
+ * \param[out]   pboxa      largest rectangles, sorted by decreasing area
+ * \param[in,out]  ppixdb   optional return output with rectangles drawn on it
+ * \return  0 if OK, 1 on error
+ *
+ * <pre>
+ * Notes:
+ *      (1) This does a greedy search to find the largest rectangles,
+ *          either black or white and without overlaps, in %pix.
+ *      (2) See pixFindLargestRectangle(), which is called multiple
+ *          times, for details.  On each call, the largest rectangle
+ *          found is painted, so that none of its pixels can be
+ *          used later, before calling it again.
+ *      (3) This function is surprisingly fast.  Although
+ *          pixFindLargestRectangle() runs at about 50 MPix/sec, when it
+ *          is run multiple times by pixFindLargeRectangles(), it processes
+ *          at 150 - 250 MPix/sec, and the time is approximately linear
+ *          in %nrect.  For example, for a 1 MPix image, searching for
+ *          the largest 50 boxes takes about 0.2 seconds.
+ * </pre>
+ */
+l_int32
+pixFindLargeRectangles(PIX          *pixs,
+                       l_int32       polarity,
+                       l_int32       nrect,
+                       BOXA        **pboxa,
+                       PIX         **ppixdb)
+{
+l_int32  i, op, bx, by, bw, bh;
+BOX     *box;
+BOXA    *boxa;
+PIX     *pix;
+
+    PROCNAME("pixFindLargeRectangles");
+
+    if (ppixdb) *ppixdb = NULL;
+    if (!pboxa)
+        return ERROR_INT("&boxa not defined", procName, 1);
+    *pboxa = NULL;
+    if (!pixs || pixGetDepth(pixs) != 1)
+        return ERROR_INT("pixs not defined or not 1 bpp", procName, 1);
+    if (polarity != 0 && polarity != 1)
+        return ERROR_INT("invalid polarity", procName, 1);
+    if (nrect > 1000) {
+        L_WARNING("large num rectangles = %d requested; using 1000\n",
+                  procName, nrect);
+        nrect = 1000;
+    }
+
+    pix = pixCopy(NULL, pixs);
+    boxa = boxaCreate(nrect);
+    *pboxa = boxa;
+
+    for (i = 0; i < nrect; i++) {
+        if (pixFindLargestRectangle(pix, polarity, &box, NULL) == 1) {
+            boxDestroy(&box);
+            L_ERROR("failure in pixFindLargestRectangle\n", procName);
+            break;
+        }
+        boxaAddBox(boxa, box, L_INSERT);
+        op = (polarity == 0) ? PIX_SET : PIX_CLR;
+        boxGetGeometry(box, &bx, &by, &bw, &bh);
+        pixRasterop(pix, bx, by, bw, bh, op, NULL, 0, 0);
+    }
+
+    if (ppixdb)
+        *ppixdb = pixDrawBoxaRandom(pixs, boxa, 3);
+
+    pixDestroy(&pix);
+    return 0;
+}
+
+
+/*!
+ * \brief   pixFindLargestRectangle()
+ *
+ * \param[in]    pixs       1 bpp
+ * \param[in]    polarity   0 within background, 1 within foreground
+ * \param[out]   pbox       largest area rectangle
+ * \param[in,out]  ppixdb   optional return output with rectangle drawn on it
+ * \return  0 if OK, 1 on error
+ *
+ * <pre>
+ * Notes:
+ *      (1) This is a simple and elegant solution to a problem in
+ *          computational geometry that at first appears to be quite
+ *          difficult: what is the largest rectangle that can be
+ *          placed in the image, covering only pixels of one polarity
+ *          (bg or fg)?  The solution is O(n), where n is the number
+ *          of pixels in the image, and it requires nothing more than
+ *          using a simple recursion relation in a single sweep of the image.
+ *      (2) In a sweep from UL to LR with left-to-right being the fast
+ *          direction, calculate the largest white rectangle at (x, y),
+ *          using previously calculated values at pixels #1 and #2:
+ *             #1:    (x, y - 1)
+ *             #2:    (x - 1, y)
+ *          We also need the most recent "black" pixels that were seen
+ *          in the current row and column.
+ *          Consider the largest area.  There are only two possibilities:
+ *             (a)  Min(w(1), horizdist) * (h(1) + 1)
+ *             (b)  Min(h(2), vertdist) * (w(2) + 1)
+ *          where
+ *             horizdist: the distance from the rightmost "black" pixel seen
+ *                        in the current row across to the current pixel
+ *             vertdist: the distance from the lowest "black" pixel seen
+ *                       in the current column down to the current pixel
+ *          and we choose the Max of (a) and (b).
+ *      (3) To convince yourself that these recursion relations are correct,
+ *          it helps to draw the maximum rectangles at #1 and #2.
+ *          Then for #1, you try to extend the rectangle down one line,
+ *          so that the height is h(1) + 1.  Do you get the full
+ *          width of #1, w(1)?  It depends on where the black pixels are
+ *          in the current row.  You know the final width is bounded by w(1)
+ *          and w(2) + 1, but the actual value depends on the distribution
+ *          of black pixels in the current row that are at a distance
+ *          from the current pixel that is between these limits.
+ *          We call that value "horizdist", and the area is then given
+ *          by the expression (a) above.  Using similar reasoning for #2,
+ *          where you attempt to extend the rectangle to the right
+ *          by 1 pixel, you arrive at (b).  The largest rectangle is
+ *          then found by taking the Max.
+ * </pre>
+ */
+l_int32
+pixFindLargestRectangle(PIX         *pixs,
+                        l_int32      polarity,
+                        BOX        **pbox,
+                        PIX        **ppixdb)
+{
+l_int32    i, j, w, h, d, wpls, val;
+l_int32    wp, hp, w1, w2, h1, h2, wmin, hmin, area1, area2;
+l_int32    xmax, ymax;  /* LR corner of the largest rectangle */
+l_int32    maxarea, wmax, hmax, vertdist, horizdist, prevfg;
+l_int32   *lowestfg;
+l_uint32  *datas, *lines;
+l_uint32 **linew, **lineh;
+BOX       *box;
+PIX       *pixw, *pixh;  /* keeps the width and height for the largest */
+                         /* rectangles whose LR corner is located there. */
+
+    PROCNAME("pixFindLargestRectangle");
+
+    if (ppixdb) *ppixdb = NULL;
+    if (!pbox)
+        return ERROR_INT("&box not defined", procName, 1);
+    *pbox = NULL;
+    if (!pixs)
+        return ERROR_INT("pixs not defined", procName, 1);
+    pixGetDimensions(pixs, &w, &h, &d);
+    if (d != 1)
+        return ERROR_INT("pixs not 1 bpp", procName, 1);
+    if (polarity != 0 && polarity != 1)
+        return ERROR_INT("invalid polarity", procName, 1);
+
+        /* Initialize lowest "fg" seen so far for each column */
+    lowestfg = (l_int32 *)LEPT_CALLOC(w, sizeof(l_int32));
+    for (i = 0; i < w; i++)
+        lowestfg[i] = -1;
+
+        /* The combination (val ^ polarity) is the color for which we
+         * are searching for the maximum rectangle.  For polarity == 0,
+         * we search in the bg (white). */
+    pixw = pixCreate(w, h, 32);  /* stores width */
+    pixh = pixCreate(w, h, 32);  /* stores height */
+    linew = (l_uint32 **)pixGetLinePtrs(pixw, NULL);
+    lineh = (l_uint32 **)pixGetLinePtrs(pixh, NULL);
+    datas = pixGetData(pixs);
+    wpls = pixGetWpl(pixs);
+    maxarea = xmax = ymax = wmax = hmax = 0;
+    for (i = 0; i < h; i++) {
+        lines = datas + i * wpls;
+        prevfg = -1;
+        for (j = 0; j < w; j++) {
+            val = GET_DATA_BIT(lines, j);
+            if ((val ^ polarity) == 0) {  /* bg (0) if polarity == 0, etc. */
+                if (i == 0 && j == 0) {
+                    wp = hp = 1;
+                } else if (i == 0) {
+                    wp = linew[i][j - 1] + 1;
+                    hp = 1;
+                } else if (j == 0) {
+                    wp = 1;
+                    hp = lineh[i - 1][j] + 1;
+                } else {
+                        /* Expand #1 prev rectangle down */
+                    w1 = linew[i - 1][j];
+                    h1 = lineh[i - 1][j];
+                    horizdist = j - prevfg;
+                    wmin = L_MIN(w1, horizdist);  /* width of new rectangle */
+                    area1 = wmin * (h1 + 1);
+
+                        /* Expand #2 prev rectangle to right */
+                    w2 = linew[i][j - 1];
+                    h2 = lineh[i][j - 1];
+                    vertdist = i - lowestfg[j];
+                    hmin = L_MIN(h2, vertdist);  /* height of new rectangle */
+                    area2 = hmin * (w2 + 1);
+
+                    if (area1 > area2) {
+                         wp = wmin;
+                         hp = h1 + 1;
+                    } else {
+                         wp = w2 + 1;
+                         hp = hmin;
+                    }
+                }
+            } else {  /* fg (1) if polarity == 0; bg (0) if polarity == 1 */
+                prevfg = j;
+                lowestfg[j] = i;
+                wp = hp = 0;
+            }
+            linew[i][j] = wp;
+            lineh[i][j] = hp;
+            if (wp * hp > maxarea) {
+                maxarea = wp * hp;
+                xmax = j;
+                ymax = i;
+                wmax = wp;
+                hmax = hp;
+            }
+        }
+    }
+
+        /* Translate from LR corner to Box coords (UL corner, w, h) */
+    box = boxCreate(xmax - wmax + 1, ymax - hmax + 1, wmax, hmax);
+    *pbox = box;
+
+    if (ppixdb) {
+        *ppixdb = pixConvertTo8(pixs, TRUE);
+        pixRenderHashBoxArb(*ppixdb, box, 6, 2, L_NEG_SLOPE_LINE, 1, 255, 0, 0);
+    }
+
+    LEPT_FREE(linew);
+    LEPT_FREE(lineh);
+    LEPT_FREE(lowestfg);
+    pixDestroy(&pixw);
+    pixDestroy(&pixh);
     return 0;
 }

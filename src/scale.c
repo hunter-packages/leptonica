@@ -30,6 +30,7 @@
  *
  *         Top-level scaling
  *               PIX      *pixScale()     ***
+ *               PIX      *pixScaleToSizeRel()     ***
  *               PIX      *pixScaleToSize()     ***
  *               PIX      *pixScaleGeneral()     ***
  *
@@ -63,11 +64,11 @@
  *         Binary scaling by closest pixel sampling
  *               PIX      *pixScaleBinary()
  *
- *         Scale-to-gray (1 bpp --\> 8 bpp; arbitrary downscaling)
+ *         Scale-to-gray (1 bpp --> 8 bpp; arbitrary downscaling)
  *               PIX      *pixScaleToGray()
  *               PIX      *pixScaleToGrayFast()
  *
- *         Scale-to-gray (1 bpp --\> 8 bpp; integer downscaling)
+ *         Scale-to-gray (1 bpp --> 8 bpp; integer downscaling)
  *               PIX      *pixScaleToGray2()
  *               PIX      *pixScaleToGray3()
  *               PIX      *pixScaleToGray4()
@@ -75,7 +76,7 @@
  *               PIX      *pixScaleToGray8()
  *               PIX      *pixScaleToGray16()
  *
- *         Scale-to-gray by mipmap(1 bpp --\> 8 bpp, arbitrary reduction)
+ *         Scale-to-gray by mipmap(1 bpp --> 8 bpp, arbitrary reduction)
  *               PIX      *pixScaleToGrayMipmap()
  *
  *         Grayscale scaling using mipmap
@@ -219,6 +220,39 @@ l_float32  maxscale, sharpfract;
 
 
 /*!
+ * \brief   pixScaleToSizeRel()
+ *
+ * \param[in]    pixs
+ * \param[in]    delw  change in width, in pixels; 0 means no change
+ * \param[in]    delh  change in height, in pixels; 0 means no change
+ * \return  pixd, or NULL on error
+ */
+PIX *
+pixScaleToSizeRel(PIX     *pixs,
+                  l_int32  delw,
+                  l_int32  delh)
+{
+l_int32  w, h, wd, hd;
+
+    PROCNAME("pixScaleToSizeRel");
+
+    if (!pixs)
+        return (PIX *)ERROR_PTR("pixs not defined", procName, NULL);
+
+    if (delw == 0 && delh == 0)
+        return pixCopy(NULL, pixs);
+
+    pixGetDimensions(pixs, &w, &h, NULL);
+    wd = w + delw;
+    hd = h + delh;
+    if (wd <= 0 || hd <= 0)
+        return (PIX *)ERROR_PTR("pix dimension reduced to 0", procName, NULL);
+
+    return pixScaleToSize(pixs, wd, hd);
+}
+
+
+/*!
  * \brief   pixScaleToSize()
  *
  * \param[in]    pixs 1, 2, 4, 8, 16 and 32 bpp
@@ -284,9 +318,9 @@ l_float32  scalex, scaley;
  *          cases are added.
  *      (3) The actual sharpening factors used depend on the maximum
  *          of the two scale factors (maxscale):
- *            maxscale \<= 0.2:        no sharpening
- *            0.2 \< maxscale \< 1.4:   uses the input parameters
- *            maxscale \>= 1.4:        no sharpening
+ *            maxscale <= 0.2:        no sharpening
+ *            0.2 < maxscale < 1.4:   uses the input parameters
+ *            maxscale >= 1.4:        no sharpening
  *      (4) To avoid sharpening for grayscale and color images with
  *          scaling factors between 0.2 and 1.4, call this function
  *          with %sharpfract == 0.0.
@@ -322,7 +356,7 @@ PIX       *pixt, *pixt2, *pixd;
         return pixScaleBinary(pixs, scalex, scaley);
 
         /* Remove colormap; clone if possible; result is either 8 or 32 bpp */
-    if ((pixt = pixConvertTo8Or32(pixs, L_CLONE, 1)) == NULL)
+    if ((pixt = pixConvertTo8Or32(pixs, L_CLONE, 0)) == NULL)
         return (PIX *)ERROR_PTR("pixt not made", procName, NULL);
 
         /* Scale (up or down) */
@@ -347,6 +381,7 @@ PIX       *pixt, *pixt2, *pixd;
 
     pixDestroy(&pixt);
     pixDestroy(&pixt2);
+    pixCopyText(pixd, pixs);
     pixCopyInputFormat(pixd, pixs);
     return pixd;
 }
@@ -402,13 +437,13 @@ PIX       *pixt, *pixd;
         return (PIX *)ERROR_PTR("pixs not {2,4,8,16,32} bpp", procName, NULL);
 
         /* Remove colormap; clone if possible; result is either 8 or 32 bpp */
-    if ((pixt = pixConvertTo8Or32(pixs, L_CLONE, 1)) == NULL)
+    if ((pixt = pixConvertTo8Or32(pixs, L_CLONE, 0)) == NULL)
         return (PIX *)ERROR_PTR("pixt not made", procName, NULL);
 
     d = pixGetDepth(pixt);
     if (d == 8)
         pixd = pixScaleGrayLI(pixt, scalex, scaley);
-    else if (d == 32)
+    else  /* d == 32 */
         pixd = pixScaleColorLI(pixt, scalex, scaley);
 
     pixDestroy(&pixt);
@@ -579,11 +614,13 @@ PIX  *pixd;
     pixbs = pixScaleGray4xLI(pixb);
     pixDestroy(&pixb);
 
-    if ((pixd = pixCreateRGBImage(pixrs, pixgs, pixbs)) == NULL)
-        return (PIX *)ERROR_PTR("pixd not made", procName, NULL);
-    if (pixGetSpp(pixs) == 4)
-        pixScaleAndTransferAlpha(pixd, pixs, 4.0, 4.0);
-    pixCopyInputFormat(pixd, pixs);
+    if ((pixd = pixCreateRGBImage(pixrs, pixgs, pixbs)) == NULL) {
+        L_ERROR("pixd not made\n", procName);
+    } else {
+        if (pixGetSpp(pixs) == 4)
+            pixScaleAndTransferAlpha(pixd, pixs, 4.0, 4.0);
+        pixCopyInputFormat(pixd, pixs);
+    }
 
     pixDestroy(&pixrs);
     pixDestroy(&pixgs);
@@ -815,7 +852,7 @@ PIX       *pixd;
  * Notes:
  *      (1) This function samples from the source without
  *          filtering.  As a result, aliasing will occur for
- *          subsampling (%scalex and/or %scaley \< 1.0).
+ *          subsampling (%scalex and/or %scaley < 1.0).
  *      (2) If %scalex == 1.0 and %scaley == 1.0, returns a copy.
  * </pre>
  */
@@ -1524,7 +1561,7 @@ PIX       *pixs, *pixd;
  * Notes:
  *      (1) This function samples from the source without
  *          filtering.  As a result, aliasing will occur for
- *          subsampling (scalex and scaley \< 1.0).
+ *          subsampling (scalex and scaley < 1.0).
  * </pre>
  */
 PIX *
@@ -1603,7 +1640,7 @@ PIX       *pixd;
  *  unnecessarily expensive.
  *
  *  The choices made are as follows:
- *      (1) Do binary upscaling before scaleToGrayN() for scalefactors \> 1/8
+ *      (1) Do binary upscaling before scaleToGrayN() for scalefactors > 1/8
  *      (2) Do binary downscaling before scaleToGray8() for scalefactors
  *          between 1/16 and 1/8.
  *      (3) Use scaleToGray16() before grayscale downscaling for
@@ -1740,10 +1777,10 @@ PIX       *pixt, *pixd;
  *          for scalefactor in the range (0.0625 ... 0.5), and the
  *          quality is nearly as good.
  *      (3) Unlike pixScaleToGray(), which does binary upscaling before
- *          downscaling for scale factors \>= 0.0625, pixScaleToGrayFast()
- *          first downscales in binary for all scale factors \< 0.5, and
+ *          downscaling for scale factors >= 0.0625, pixScaleToGrayFast()
+ *          first downscales in binary for all scale factors < 0.5, and
  *          then does a 2x scale-to-gray as the final step.  For
- *          scale factors \< 0.0625, both do a 16x scale-to-gray, followed
+ *          scale factors < 0.0625, both do a 16x scale-to-gray, followed
  *          by further grayscale reduction.
  * </pre>
  */
@@ -1851,13 +1888,9 @@ PIX       *pixd;
     wpls = pixGetWpl(pixs);
     wpld = pixGetWpl(pixd);
 
-    if ((sumtab = makeSumTabSG2()) == NULL)
-        return (PIX *)ERROR_PTR("sumtab not made", procName, NULL);
-    if ((valtab = makeValTabSG2()) == NULL)
-        return (PIX *)ERROR_PTR("valtab not made", procName, NULL);
-
+    sumtab = makeSumTabSG2();
+    valtab = makeValTabSG2();
     scaleToGray2Low(datad, wd, hd, wpld, datas, wpls, sumtab, valtab);
-
     LEPT_FREE(sumtab);
     LEPT_FREE(valtab);
     return pixd;
@@ -1912,13 +1945,9 @@ PIX       *pixd;
     wpls = pixGetWpl(pixs);
     wpld = pixGetWpl(pixd);
 
-    if ((sumtab = makeSumTabSG3()) == NULL)
-        return (PIX *)ERROR_PTR("sumtab not made", procName, NULL);
-    if ((valtab = makeValTabSG3()) == NULL)
-        return (PIX *)ERROR_PTR("valtab not made", procName, NULL);
-
+    sumtab = makeSumTabSG3();
+    valtab = makeValTabSG3();
     scaleToGray3Low(datad, wd, hd, wpld, datas, wpls, sumtab, valtab);
-
     LEPT_FREE(sumtab);
     LEPT_FREE(valtab);
     return pixd;
@@ -1970,13 +1999,9 @@ PIX       *pixd;
     wpls = pixGetWpl(pixs);
     wpld = pixGetWpl(pixd);
 
-    if ((sumtab = makeSumTabSG4()) == NULL)
-        return (PIX *)ERROR_PTR("sumtab not made", procName, NULL);
-    if ((valtab = makeValTabSG4()) == NULL)
-        return (PIX *)ERROR_PTR("valtab not made", procName, NULL);
-
+    sumtab = makeSumTabSG4();
+    valtab = makeValTabSG4();
     scaleToGray4Low(datad, wd, hd, wpld, datas, wpls, sumtab, valtab);
-
     LEPT_FREE(sumtab);
     LEPT_FREE(valtab);
     return pixd;
@@ -2028,13 +2053,9 @@ PIX       *pixd;
     wpls = pixGetWpl(pixs);
     wpld = pixGetWpl(pixd);
 
-    if ((tab8 = makePixelSumTab8()) == NULL)
-        return (PIX *)ERROR_PTR("tab8 not made", procName, NULL);
-    if ((valtab = makeValTabSG6()) == NULL)
-        return (PIX *)ERROR_PTR("valtab not made", procName, NULL);
-
+    tab8 = makePixelSumTab8();
+    valtab = makeValTabSG6();
     scaleToGray6Low(datad, wd, hd, wpld, datas, wpls, tab8, valtab);
-
     LEPT_FREE(tab8);
     LEPT_FREE(valtab);
     return pixd;
@@ -2081,13 +2102,9 @@ PIX       *pixd;
     wpls = pixGetWpl(pixs);
     wpld = pixGetWpl(pixd);
 
-    if ((tab8 = makePixelSumTab8()) == NULL)
-        return (PIX *)ERROR_PTR("tab8 not made", procName, NULL);
-    if ((valtab = makeValTabSG8()) == NULL)
-        return (PIX *)ERROR_PTR("valtab not made", procName, NULL);
-
+    tab8 = makePixelSumTab8();
+    valtab = makeValTabSG8();
     scaleToGray8Low(datad, wd, hd, wpld, datas, wpls, tab8, valtab);
-
     LEPT_FREE(tab8);
     LEPT_FREE(valtab);
     return pixd;
@@ -2133,11 +2150,8 @@ PIX       *pixd;
     wpls = pixGetWpl(pixs);
     wpld = pixGetWpl(pixd);
 
-    if ((tab8 = makePixelSumTab8()) == NULL)
-        return (PIX *)ERROR_PTR("tab8 not made", procName, NULL);
-
+    tab8 = makePixelSumTab8();
     scaleToGray16Low(datad, wd, hd, wpld, datas, wpls, tab8);
-
     LEPT_FREE(tab8);
     return pixd;
 }
@@ -2346,7 +2360,7 @@ PIX       *pixd;
         return pixCopy(NULL, pixs);
 
     if (d == 1)
-        return pixExpandBinaryReplicate(pixs, factor);
+        return pixExpandBinaryReplicate(pixs, factor, factor);
 
     wd = factor * w;
     hd = factor * h;
@@ -2490,8 +2504,10 @@ PIX       *pixd;
         return (PIX *)ERROR_PTR("lineb not made", procName, NULL);
 
         /* Make dest binary image */
-    if ((pixd = pixCreate(wd, hd, 1)) == NULL)
+    if ((pixd = pixCreate(wd, hd, 1)) == NULL) {
+        LEPT_FREE(lineb);
         return (PIX *)ERROR_PTR("pixd not made", procName, NULL);
+    }
     pixCopyInputFormat(pixd, pixs);
     pixCopyResolution(pixd, pixs);
     pixScaleResolution(pixd, 2.0, 2.0);
@@ -2543,10 +2559,10 @@ pixScaleGray2xLIDither(PIX  *pixs)
 l_int32    i, ws, hs, hsm, wd, hd, wpls, wplb, wpld;
 l_uint32  *datas, *datad;
 l_uint32  *lined;
-l_uint32  *lineb;   /* 2 intermediate buffer lines */
-l_uint32  *linebp;  /* 1 intermediate buffer line */
-l_uint32  *bufs;    /* 2 source buffer lines */
-PIX       *pixd;
+l_uint32  *lineb = NULL;   /* 2 intermediate buffer lines */
+l_uint32  *linebp = NULL;  /* 1 intermediate buffer line */
+l_uint32  *bufs = NULL;    /* 2 source buffer lines */
+PIX       *pixd = NULL;
 
     PROCNAME("pixScaleGray2xLIDither");
 
@@ -2567,16 +2583,22 @@ PIX       *pixd;
 
         /* Make line buffer for 2 lines of virtual intermediate image */
     wplb = (wd + 3) / 4;
-    if ((lineb = (l_uint32 *)LEPT_CALLOC(2 * wplb, sizeof(l_uint32))) == NULL)
-        return (PIX *)ERROR_PTR("lineb not made", procName, NULL);
+    if ((lineb = (l_uint32 *)LEPT_CALLOC(2 * wplb, sizeof(l_uint32))) == NULL) {
+        L_ERROR("lineb not made\n", procName);
+        goto cleanup;
+    }
 
         /* Make line buffer for 1 line of virtual intermediate image */
-    if ((linebp = (l_uint32 *)LEPT_CALLOC(wplb, sizeof(l_uint32))) == NULL)
-        return (PIX *)ERROR_PTR("linebp not made", procName, NULL);
+    if ((linebp = (l_uint32 *)LEPT_CALLOC(wplb, sizeof(l_uint32))) == NULL) {
+        L_ERROR("linebp not made\n", procName);
+        goto cleanup;
+    }
 
         /* Make dest binary image */
-    if ((pixd = pixCreate(wd, hd, 1)) == NULL)
-        return (PIX *)ERROR_PTR("pixd not made", procName, NULL);
+    if ((pixd = pixCreate(wd, hd, 1)) == NULL) {
+        L_ERROR("pixd not made\n", procName);
+        goto cleanup;
+    }
     pixCopyInputFormat(pixd, pixs);
     pixCopyResolution(pixd, pixs);
     pixScaleResolution(pixd, 2.0, 2.0);
@@ -2621,6 +2643,7 @@ PIX       *pixd;
                           DEFAULT_CLIP_LOWER_1, DEFAULT_CLIP_UPPER_1, 1);
                                                    /* last dest line */
 
+cleanup:
     LEPT_FREE(bufs);
     LEPT_FREE(lineb);
     LEPT_FREE(linebp);
@@ -2679,8 +2702,10 @@ PIX       *pixd;
         return (PIX *)ERROR_PTR("lineb not made", procName, NULL);
 
         /* Make dest binary image */
-    if ((pixd = pixCreate(wd, hd, 1)) == NULL)
+    if ((pixd = pixCreate(wd, hd, 1)) == NULL) {
+        LEPT_FREE(lineb);
         return (PIX *)ERROR_PTR("pixd not made", procName, NULL);
+    }
     pixCopyInputFormat(pixd, pixs);
     pixCopyResolution(pixd, pixs);
     pixScaleResolution(pixd, 4.0, 4.0);
@@ -2741,10 +2766,10 @@ pixScaleGray4xLIDither(PIX  *pixs)
 l_int32    i, j, ws, hs, hsm, wd, hd, wpls, wplb, wpld;
 l_uint32  *datas, *datad;
 l_uint32  *lined;
-l_uint32  *lineb;   /* 4 intermediate buffer lines */
-l_uint32  *linebp;  /* 1 intermediate buffer line */
-l_uint32  *bufs;    /* 2 source buffer lines */
-PIX       *pixd;
+l_uint32  *lineb = NULL;   /* 4 intermediate buffer lines */
+l_uint32  *linebp = NULL;  /* 1 intermediate buffer line */
+l_uint32  *bufs = NULL;    /* 2 source buffer lines */
+PIX       *pixd = NULL;
 
     PROCNAME("pixScaleGray4xLIDither");
 
@@ -2765,16 +2790,22 @@ PIX       *pixd;
 
         /* Make line buffer for 4 lines of virtual intermediate image */
     wplb = (wd + 3) / 4;
-    if ((lineb = (l_uint32 *)LEPT_CALLOC(4 * wplb, sizeof(l_uint32))) == NULL)
-        return (PIX *)ERROR_PTR("lineb not made", procName, NULL);
+    if ((lineb = (l_uint32 *)LEPT_CALLOC(4 * wplb, sizeof(l_uint32))) == NULL) {
+        L_ERROR("lineb not made\n", procName);
+        goto cleanup;
+    }
 
         /* Make line buffer for 1 line of virtual intermediate image */
-    if ((linebp = (l_uint32 *)LEPT_CALLOC(wplb, sizeof(l_uint32))) == NULL)
-        return (PIX *)ERROR_PTR("linebp not made", procName, NULL);
+    if ((linebp = (l_uint32 *)LEPT_CALLOC(wplb, sizeof(l_uint32))) == NULL) {
+        L_ERROR("linebp not made\n", procName);
+        goto cleanup;
+    }
 
         /* Make dest binary image */
-    if ((pixd = pixCreate(wd, hd, 1)) == NULL)
-        return (PIX *)ERROR_PTR("pixd not made", procName, NULL);
+    if ((pixd = pixCreate(wd, hd, 1)) == NULL) {
+        L_ERROR("pixd not made\n", procName);
+        goto cleanup;
+    }
     pixCopyInputFormat(pixd, pixs);
     pixCopyResolution(pixd, pixs);
     pixScaleResolution(pixd, 4.0, 4.0);
@@ -2826,6 +2857,7 @@ PIX       *pixd;
     ditherToBinaryLineLow(lined + 3 * wpld, wd, lineb + 3 * wplb, NULL,
                               DEFAULT_CLIP_LOWER_1, DEFAULT_CLIP_UPPER_1, 1);
 
+cleanup:
     LEPT_FREE(bufs);
     LEPT_FREE(lineb);
     LEPT_FREE(linebp);
@@ -3275,7 +3307,7 @@ PIX  *pix1, *pix2;
  *              pixt = pixGammaTRCWithAlpha(NULL, pixs, 1.0 / gamma, 0, 255);
  *              pixd = pixScaleWithAlpha(pixt, scalex, scaley, NULL, fract);
  *              pixGammaTRCWithAlpha(pixd, pixd, gamma, 0, 255);
- *              pixDestroy(\&pixt);
+ *              pixDestroy(&pixt);
  *          This has the side-effect of producing artifacts in the very
  *          dark regions.
  *

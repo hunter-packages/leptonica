@@ -1,9 +1,10 @@
 AM_CFLAGS = $(DEBUG_FLAGS)
+AM_CPPFLAGS = $(ZLIB_CFLAGS) $(LIBPNG_CFLAGS) $(JPEG_CFLAGS) $(LIBTIFF_CFLAGS) $(LIBWEBP_CFLAGS) $(LIBJP2K_CFLAGS)
 
 lib_LTLIBRARIES = liblept.la
 liblept_la_LIBADD = $(LIBM) $(ZLIB_LIBS) $(LIBPNG_LIBS) $(JPEG_LIBS) $(GIFLIB_LIBS) $(LIBTIFF_LIBS) $(LIBWEBP_LIBS) $(LIBJP2K_LIBS) $(GDI_LIBS)
 
-liblept_la_LDFLAGS = -no-undefined -version-info 5:0:0
+liblept_la_LDFLAGS = -no-undefined -version-info 5:1:0
 
 liblept_la_SOURCES = adaptmap.c affine.c                        \
  affinecompose.c arrayaccess.c                                  \
@@ -21,7 +22,8 @@ liblept_la_SOURCES = adaptmap.c affine.c                        \
  compare.c conncomp.c convertfiles.c                            \
  convolve.c correlscore.c                                       \
  dewarp1.c dewarp2.c dewarp3.c dewarp4.c                        \
- dnabasic.c dnahash.c dwacomb.2.c dwacomblow.2.c                \
+ dnabasic.c dnafunc1.c dnahash.c                                \
+ dwacomb.2.c dwacomblow.2.c                                     \
  edge.c encoding.c enhance.c                                    \
  fhmtauto.c fhmtgen.1.c fhmtgenlow.1.c			        \
  finditalic.c flipdetect.c fliphmtgen.c                         \
@@ -56,10 +58,10 @@ liblept_la_SOURCES = adaptmap.c affine.c                        \
  seedfill.c seedfilllow.c                                       \
  sel1.c sel2.c selgen.c                                         \
  shear.c skew.c	spixio.c                                        \
- stack.c stringcode.c sudoku.c textops.c                        \
+ stack.c stringcode.c                                           \
+ strokes.c sudoku.c textops.c                                   \
  tiffio.c tiffiostub.c 		                                \
- utils.c viewfiles.c                                            \
- warper.c watershed.c                                           \
+ utils1.c utils2.c warper.c watershed.c                         \
  webpio.c webpiostub.c		                                \
  writefile.c zlibmem.c zlibmemstub.c
 
@@ -75,8 +77,7 @@ pkginclude_HEADERS = allheaders.h alltypes.h                    \
 
 LDADD = liblept.la
 
-EXTRA_DIST = arrayaccess.h.vc                                   \
- hmttemplate1.txt hmttemplate2.txt                              \
+EXTRA_DIST = hmttemplate1.txt hmttemplate2.txt                  \
  leptonica-license.txt		                                \
  morphtemplate1.txt morphtemplate2.txt                          \
  stringtemplate1.txt stringtemplate2.txt

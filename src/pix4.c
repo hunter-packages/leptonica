@@ -44,6 +44,9 @@
  *           NUMA       *pixGetCmapHistogram()
  *           NUMA       *pixGetCmapHistogramMasked()
  *           NUMA       *pixGetCmapHistogramInRect()
+ *           l_int32     pixCountRGBColors()
+ *           L_AMAP     *pixGetColorAmapHistogram()
+ *           l_int32     amapGetCountForColor()
  *           l_int32     pixGetRankValue()
  *           l_int32     pixGetRankValueMaskedRGB()
  *           l_int32     pixGetRankValueMasked()
@@ -98,8 +101,7 @@
  *          pixGetCmapHistogram().
  *      (2) If pixs does not have a colormap, the output histogram is
  *          of size 2^d, where d is the depth of pixs.
- *      (3) This always returns a 256-value histogram of pixel values.
- *      (4) Set the subsampling factor \> 1 to reduce the amount of computation.
+ *      (3) Set the subsampling factor > 1 to reduce the amount of computation.
  * </pre>
  */
 NUMA *
@@ -146,35 +148,26 @@ PIX        *pixg;
     data = pixGetData(pixg);
     for (i = 0; i < h; i += factor) {
         line = data + i * wpl;
-        switch (d)
-        {
-        case 2:
+        if (d == 2) {
             for (j = 0; j < w; j += factor) {
                 val = GET_DATA_DIBIT(line, j);
                 array[val] += 1.0;
             }
-            break;
-        case 4:
+        } else if (d == 4) {
             for (j = 0; j < w; j += factor) {
                 val = GET_DATA_QBIT(line, j);
                 array[val] += 1.0;
             }
-            break;
-        case 8:
+        } else if (d == 8) {
             for (j = 0; j < w; j += factor) {
                 val = GET_DATA_BYTE(line, j);
                 array[val] += 1.0;
             }
-            break;
-        case 16:
+        } else {  /* d == 16 */
             for (j = 0; j < w; j += factor) {
                 val = GET_DATA_TWO_BYTES(line, j);
                 array[val] += 1.0;
             }
-            break;
-        default:
-            numaDestroy(&na);
-            return (NUMA *)ERROR_PTR("illegal depth", procName, NULL);
         }
     }
 
@@ -200,7 +193,7 @@ PIX        *pixg;
  *          If you want a histogram of the colormap indices, use
  *          pixGetCmapHistogramMasked().
  *      (2) This always returns a 256-value histogram of pixel values.
- *      (3) Set the subsampling factor \> 1 to reduce the amount of computation.
+ *      (3) Set the subsampling factor > 1 to reduce the amount of computation.
  *      (4) Clipping of pixm (if it exists) to pixs is done in the inner loop.
  *      (5) Input x,y are ignored unless pixm exists.
  * </pre>
@@ -282,7 +275,7 @@ PIX        *pixg;
  *          If you want a histogram of the colormap indices, use
  *          pixGetCmapHistogramInRect().
  *      (2) This always returns a 256-value histogram of pixel values.
- *      (3) Set the subsampling %factor \> 1 to reduce the amount of computation.
+ *      (3) Set the subsampling %factor > 1 to reduce the amount of computation.
  * </pre>
  */
 NUMA *
@@ -350,7 +343,7 @@ PIX        *pixg;
  * Notes:
  *      (1) If pixs is cmapped, it is converted to 8 bpp gray.
  *      (2) This returns a set of 256-value histograms of pixel values.
- *      (3) Set the subsampling factor \> 1 to reduce the amount of computation.
+ *      (3) Set the subsampling factor > 1 to reduce the amount of computation.
  * </pre>
  */
 NUMAA *
@@ -407,7 +400,7 @@ PIXA    *pixa;
  * Notes:
  *      (1) This generates a set of three 256 entry histograms,
  *          one for each color component (r,g,b).
- *      (2) Set the subsampling %factor \> 1 to reduce the amount of computation.
+ *      (2) Set the subsampling %factor > 1 to reduce the amount of computation.
  * </pre>
  */
 l_int32
@@ -507,7 +500,7 @@ PIXCMAP    *cmap;
  * <pre>
  * Notes:
  *      (1) This generates a set of three 256 entry histograms,
- *      (2) Set the subsampling %factor \> 1 to reduce the amount of computation.
+ *      (2) Set the subsampling %factor > 1 to reduce the amount of computation.
  *      (3) Clipping of pixm (if it exists) to pixs is done in the inner loop.
  *      (4) Input x,y are ignored unless pixm exists.
  * </pre>
@@ -624,7 +617,7 @@ PIXCMAP    *cmap;
  * Notes:
  *      (1) This generates a histogram of colormap pixel indices,
  *          and is of size 2^d.
- *      (2) Set the subsampling %factor \> 1 to reduce the amount of computation.
+ *      (2) Set the subsampling %factor > 1 to reduce the amount of computation.
  * </pre>
  */
 NUMA *
@@ -688,7 +681,7 @@ NUMA       *na;
  * Notes:
  *      (1) This generates a histogram of colormap pixel indices,
  *          and is of size 2^d.
- *      (2) Set the subsampling %factor \> 1 to reduce the amount of computation.
+ *      (2) Set the subsampling %factor > 1 to reduce the amount of computation.
  *      (3) Clipping of pixm to pixs is done in the inner loop.
  * </pre>
  */
@@ -768,7 +761,7 @@ NUMA       *na;
  * Notes:
  *      (1) This generates a histogram of colormap pixel indices,
  *          and is of size 2^d.
- *      (2) Set the subsampling %factor \> 1 to reduce the amount of computation.
+ *      (2) Set the subsampling %factor > 1 to reduce the amount of computation.
  *      (3) Clipping to the box is done in the inner loop.
  * </pre>
  */
@@ -822,6 +815,109 @@ NUMA       *na;
     }
 
     return na;
+}
+
+
+/*!
+ * \brief   pixCountRGBColors()
+ *
+ * \param[in]    pixs    rgb or rgba
+ * \return  ncolors, or -1 on error
+ */
+l_int32
+pixCountRGBColors(PIX  *pixs)
+{
+l_int32  ncolors;
+L_AMAP  *amap;
+
+    PROCNAME("pixCountRGBColors");
+
+    if (!pixs || pixGetDepth(pixs) != 32)
+        return ERROR_INT("pixs not defined or not 32 bpp", procName, -1);
+    amap = pixGetColorAmapHistogram(pixs, 1);
+    ncolors = l_amapSize(amap);
+    l_amapDestroy(&amap);
+    return ncolors;
+}
+
+
+/*!
+ * \brief   pixGetColorAmapHistogram()
+ *
+ * \param[in]    pixs    rgb or rgba
+ * \param[in]    factor  subsampling factor; integer >= 1
+ * \return  amap, or NULL on error
+ *
+ * <pre>
+ * Notes:
+ *      (1) This generates an ordered map from pixel value to histogram count.
+ *      (2) Use amapGetCountForColor() to use the map to look up a count.
+ * </pre>
+ */
+L_AMAP  *
+pixGetColorAmapHistogram(PIX     *pixs,
+                         l_int32  factor)
+{
+l_int32    i, j, w, h, wpl;
+l_uint32  *data, *line;
+L_AMAP    *amap;
+RB_TYPE    key, value;
+RB_TYPE   *pval;
+
+    PROCNAME("pixGetColorAmapHistogram");
+
+    if (!pixs)
+        return (L_AMAP *)ERROR_PTR("pixs not defined", procName, NULL);
+    if (pixGetDepth(pixs) != 32)
+        return (L_AMAP *)ERROR_PTR("pixs not 32 bpp", procName, NULL);
+    pixGetDimensions(pixs, &w, &h, NULL);
+    data = pixGetData(pixs);
+    wpl = pixGetWpl(pixs);
+    amap = l_amapCreate(L_UINT_TYPE);
+    for (i = 0; i < h; i += factor) {
+        line = data + i * wpl;
+        for (j = 0; j < w; j += factor) {
+            key.utype = line[j];
+            pval = l_amapFind(amap, key);
+            if (!pval)
+                value.itype = 1;
+            else
+                value.itype = 1 + pval->itype;
+            l_amapInsert(amap, key, value);
+        }
+    }
+
+    return amap;
+}
+
+
+/*!
+ * \brief   amapGetCountForColor()
+ *
+ * \param[in]    amap    map from pixel value to count
+ * \param[in]    val     rgb or rgba pixel value
+ * \return  count, or -1 on error
+ *
+ * <pre>
+ * Notes:
+ *      (1) The ordered map is made by pixGetColorAmapHistogram().
+ * </pre>
+ */
+l_int32
+amapGetCountForColor(L_AMAP   *amap,
+                     l_uint32  val)
+{
+RB_TYPE   key;
+RB_TYPE  *pval;
+
+    PROCNAME("amapGetCountForColor");
+
+    if (!amap)
+        return ERROR_INT("amap not defined", procName, -1);
+ 
+    key.utype = val;
+    pval = l_amapFind(amap, key);
+    return (pval) ? pval->itype : 0;
 }
 
 
@@ -905,7 +1001,7 @@ PIXCMAP   *cmap;
  *      (1) Computes the rank component values of pixels in pixs that
  *          are under the fg of the optional mask.  If the mask is null, it
  *          computes the average of the pixels in pixs.
- *      (2) Set the subsampling %factor \> 1 to reduce the amount of
+ *      (2) Set the subsampling %factor > 1 to reduce the amount of
  *          computation.
  *      (4) Input x,y are ignored unless pixm exists.
  *      (5) The rank must be in [0.0 ... 1.0], where the brightest pixel
@@ -991,7 +1087,7 @@ PIX       *pixmt, *pixt;
  *      (1) Computes the rank value of pixels in pixs that are under
  *          the fg of the optional mask.  If the mask is null, it
  *          computes the average of the pixels in pixs.
- *      (2) Set the subsampling %factor \> 1 to reduce the amount of
+ *      (2) Set the subsampling %factor > 1 to reduce the amount of
  *          computation.
  *      (3) Clipping of pixm (if it exists) to pixs is done in the inner loop.
  *      (4) Input x,y are ignored unless pixm exists.
@@ -1000,7 +1096,7 @@ PIX       *pixmt, *pixt;
  *      (6) The histogram can optionally be returned, so that other rank
  *          values can be extracted without recomputing the histogram.
  *          In that case, just use
- *              numaHistogramGetValFromRank(na, rank, \&val);
+ *              numaHistogramGetValFromRank(na, rank, &val);
  *          on the returned Numa for additional rank values.
  * </pre>
  */
@@ -1214,8 +1310,8 @@ PIXCMAP  *cmap;
  *          L_VARIANCE to get the average squared difference from the
  *          expected value.  The variance is the square of the stdev.
  *          For the standard deviation, we use
- *              sqrt(\<(\<x\> - x)\>^2) = sqrt(\<x^2\> - \<x\>^2)
- *      (3) Set the subsampling %factor \> 1 to reduce the amount of
+ *              sqrt(<(<x> - x)>^2) = sqrt(<x^2> - <x>^2)
+ *      (3) Set the subsampling %factor > 1 to reduce the amount of
  *          computation.
  *      (4) Clipping of pixm (if it exists) to pixs is done in the inner loop.
  *      (5) Input x,y are ignored unless pixm exists.
@@ -1899,7 +1995,7 @@ PIXCMAP  *cmap;
  *
  * <pre>
  * Notes:
- *      (1) If pixs is grayscale, the result is returned in \&grayval.
+ *      (1) If pixs is grayscale, the result is returned in &grayval.
  *          Otherwise, if there is a colormap or d == 32,
  *          each requested color component is returned.  At least
  *          one color component (address) must be input.
@@ -2197,33 +2293,34 @@ PIX       *pixt;
 /*!
  * \brief   pixGetRankColorArray()
  *
- * \param[in]    pixs 32 bpp or cmapped
- * \param[in]    nbins number of equal population bins; must be > 1
- * \param[in]    type color selection flag
- * \param[in]    factor subsampling factor; integer >= 1
- * \param[out]   pcarray array of colors, ranked by intensity
+ * \param[in]    pixs      32 bpp or cmapped
+ * \param[in]    nbins     number of equal population bins; must be > 1
+ * \param[in]    type      color selection flag
+ * \param[in]    factor    subsampling factor; integer >= 1
+ * \param[out]   pcarray   array of colors, ranked by intensity
  * \param[in]    debugflag 1 to display color squares and plots of color
  *                         components; 2 to write them as png to file
- * \param[in]    fontsize [optional] 0 for no debug; for debug, valid set
- *                        is {4,6,8,10,12,14,16,18,20}.  Ignored if
- *                        debugflag == 0.  fontsize == 6 is typical.
+ * \param[in]    fontsize  [optional] 0 for no debug; for debug, valid set
+ *                         is {4,6,8,10,12,14,16,18,20}.  Ignored if
+ *                         debugflag == 0.  fontsize == 6 is typical.
  * \return  0 if OK, 1 on error
  *
  * <pre>
  * Notes:
  *      (1) The color selection flag is one of: L_SELECT_RED, L_SELECT_GREEN,
- *          L_SELECT_BLUE, L_SELECT_MIN, L_SELECT_MAX, L_SELECT_AVERAGE.
- *      (2) Then it finds the histogram of the selected component in each
+ *          L_SELECT_BLUE, L_SELECT_MIN, L_SELECT_MAX, L_SELECT_AVERAGE,
+ *          L_SELECT_HUE, L_SELECT_SATURATION.
+ *      (2) Then it finds the histogram of the selected color type in each
  *          RGB pixel.  For each of the %nbins sets of pixels,
- *          ordered by this component value, find the average color,
+ *          ordered by this color type value, find the average RGB color,
  *          and return this as a "rank color" array.  The output array
  *          has %nbins colors.
- *      (3) Set the subsampling factor \> 1 to reduce the amount of
+ *      (3) Set the subsampling factor > 1 to reduce the amount of
  *          computation.  Typically you want at least 10,000 pixels
  *          for reasonable statistics.
  *      (4) The rank color as a function of rank can then be found from
  *             rankint = (l_int32)(rank * (nbins - 1) + 0.5);
- *             extractRGBValues(array[rankint], \&rval, \&gval, \&bval);
+ *             extractRGBValues(array[rankint], &rval, &gval, &bval);
  *          where the rank is in [0.0 ... 1.0].
  *          This function is meant to be simple and approximate.
  *      (5) Compare this with pixGetBinnedColor(), which generates equal
@@ -2261,7 +2358,8 @@ PIXCMAP   *cmap;
         return ERROR_INT("pixs neither 32 bpp nor cmapped", procName, 1);
     if (type != L_SELECT_RED && type != L_SELECT_GREEN &&
         type != L_SELECT_BLUE && type != L_SELECT_MIN &&
-        type != L_SELECT_MAX && type != L_SELECT_AVERAGE)
+        type != L_SELECT_MAX && type != L_SELECT_AVERAGE &&
+        type != L_SELECT_HUE && type != L_SELECT_SATURATION)
         return ERROR_INT("invalid type", procName, 1);
     if (debugflag > 0) {
         if (fontsize < 0 || fontsize > 20 || fontsize & 1 || fontsize == 2)
@@ -2287,8 +2385,12 @@ PIXCMAP   *cmap;
         pixg = pixConvertRGBToGrayMinMax(pixc, L_CHOOSE_MIN);
     else if (type == L_SELECT_MAX)
         pixg = pixConvertRGBToGrayMinMax(pixc, L_CHOOSE_MAX);
-    else  /* L_SELECT_AVERAGE */
+    else if (type == L_SELECT_AVERAGE)
         pixg = pixConvertRGBToGray(pixc, 0.34, 0.33, 0.33);
+    else if (type == L_SELECT_HUE)
+        pixg = pixConvertRGBToHue(pixc);
+    else  /* L_SELECT_SATURATION */
+        pixg = pixConvertRGBToSaturation(pixc);
     if ((na = pixGetGrayHistogram(pixg, 1)) == NULL) {
         pixDestroy(&pixc);
         pixDestroy(&pixg);
@@ -2396,7 +2498,7 @@ pixGetBinnedColor(PIX        *pixs,
                   l_uint32  **pcarray,
                   l_int32     debugflag)
 {
-l_int32     i, j, w, h, wpls, wplg, grayval, bin, rval, gval, bval;
+l_int32     i, j, w, h, wpls, wplg, grayval, bin, rval, gval, bval, success;
 l_int32     npts, avepts, maxpts;
 l_uint32   *datas, *datag, *lines, *lineg, *carray;
 l_float64   norm;
@@ -2483,8 +2585,12 @@ l_float64  *rarray, *garray, *barray, *narray;
     }
 
         /* Save colors for all bins  in a single array */
-    if ((carray = (l_uint32 *)LEPT_CALLOC(nbins, sizeof(l_uint32))) == NULL)
-        return ERROR_INT("rankcolor not made", procName, 1);
+    success = TRUE;
+    if ((carray = (l_uint32 *)LEPT_CALLOC(nbins, sizeof(l_uint32))) == NULL) {
+        success = FALSE;
+        L_ERROR("carray not made\n", procName);
+        goto cleanup_arrays;
+    }
     *pcarray = carray;
     for (i = 0; i < nbins; i++) {
         rval = (l_int32)(rarray[i] + 0.5);
@@ -2493,11 +2599,12 @@ l_float64  *rarray, *garray, *barray, *narray;
         composeRGBPixel(rval, gval, bval, carray + i);
     }
 
+cleanup_arrays:
     LEPT_FREE(rarray);
     LEPT_FREE(garray);
     LEPT_FREE(barray);
     LEPT_FREE(narray);
-    return 0;
+    return (success) ? 0 : 1;
 }
 
 
@@ -2883,12 +2990,9 @@ l_uint32  *lines, *datas;
                 colvect[i] = bin2gray[modeval];
         } else {  /* type == L_MODE_COUNT */
             max = 0;
-            modeval = 0;
             for (k = 0; k < nbins; k++) {
-                if (histo[k] > max) {
+                if (histo[k] > max)
                     max = histo[k];
-                    modeval = k;
-                }
             }
             colvect[i] = max;
         }
@@ -3004,12 +3108,9 @@ l_uint32  *datas;
                 rowvect[j] = bin2gray[modeval];
         } else {  /* type == L_MODE_COUNT */
             max = 0;
-            modeval = 0;
             for (k = 0; k < nbins; k++) {
-                if (histo[k] > max) {
+                if (histo[k] > max)
                     max = histo[k];
-                    modeval = k;
-                }
             }
             rowvect[j] = max;
         }

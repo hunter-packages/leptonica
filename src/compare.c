@@ -32,6 +32,7 @@
  *           l_int32     pixEqual()
  *           l_int32     pixEqualWithAlpha()
  *           l_int32     pixEqualWithCmap()
+ *           l_int32     cmapEqual()
  *           l_int32     pixUsesCmapColor()
  *
  *      Binary correlation
@@ -325,7 +326,7 @@ PIXCMAP   *cmap1, *cmap2;
         linebits = d1 * w1;
         fullwords = linebits / 32;
         endbits = linebits & 31;
-        endmask = (endbits == 0) ? 0 : (0xffffffffU << (32 - endbits));
+        endmask = (endbits == 0) ? 0 : (0xffffffff << (32 - endbits));
         for (i = 0; i < h1; i++) {
             line1 = data1 + wpl1 * i;
             line2 = data2 + wpl2 * i;
@@ -381,8 +382,7 @@ pixEqualWithCmap(PIX      *pix1,
                  l_int32  *psame)
 {
 l_int32    d, w, h, wpl1, wpl2, i, j, linebits, fullwords, endbits;
-l_int32    nc1, nc2, samecmaps;
-l_int32    rval1, rval2, gval1, gval2, bval1, bval2;
+l_int32    rval1, rval2, gval1, gval2, bval1, bval2, samecmaps;
 l_uint32   endmask, val1, val2;
 l_uint32  *data1, *data2, *line1, *line2;
 PIXCMAP   *cmap1, *cmap2;
@@ -399,41 +399,19 @@ PIXCMAP   *cmap1, *cmap2;
 
     if (pixSizesEqual(pix1, pix2) == 0)
         return 0;
-
     cmap1 = pixGetColormap(pix1);
     cmap2 = pixGetColormap(pix2);
     if (!cmap1 || !cmap2) {
         L_INFO("both images don't have colormap\n", procName);
         return 0;
     }
-    d = pixGetDepth(pix1);
+    pixGetDimensions(pix1, &w, &h, &d);
     if (d != 1 && d != 2 && d != 4 && d != 8) {
         L_INFO("pix depth not in {1, 2, 4, 8}\n", procName);
         return 0;
     }
 
-    nc1 = pixcmapGetCount(cmap1);
-    nc2 = pixcmapGetCount(cmap2);
-    samecmaps = TRUE;
-    if (nc1 != nc2) {
-        L_INFO("colormap sizes are different\n", procName);
-        samecmaps = FALSE;
-    }
-
-        /* Check if colormaps are identical */
-    if (samecmaps == TRUE) {
-        for (i = 0; i < nc1; i++) {
-            pixcmapGetColor(cmap1, i, &rval1, &gval1, &bval1);
-            pixcmapGetColor(cmap2, i, &rval2, &gval2, &bval2);
-            if (rval1 != rval2 || gval1 != gval2 || bval1 != bval2) {
-                samecmaps = FALSE;
-                break;
-            }
-        }
-    }
-
-    h = pixGetHeight(pix1);
-    w = pixGetWidth(pix1);
+    cmapEqual(cmap1, cmap2, 3, &samecmaps);
     if (samecmaps == TRUE) {  /* colormaps are identical; compare by words */
         linebits = d * w;
         wpl1 = pixGetWpl(pix1);
@@ -442,7 +420,7 @@ PIXCMAP   *cmap1, *cmap2;
         data2 = pixGetData(pix2);
         fullwords = linebits / 32;
         endbits = linebits & 31;
-        endmask = 0xffffffff << (32 - endbits);
+        endmask = (endbits == 0) ? 0 : (0xffffffff << (32 - endbits));
         for (i = 0; i < h; i++) {
             line1 = data1 + wpl1 * i;
             line2 = data2 + wpl2 * i;
@@ -474,6 +452,62 @@ PIXCMAP   *cmap1, *cmap2;
     }
 
     *psame = 1;
+    return 0;
+}
+
+
+/*!
+ * \brief   cmapEqual()
+ *
+ * \param[in]    cmap1
+ * \param[in]    cmap2
+ * \param[in]    ncomps  3 for RGB, 4 for RGBA
+ * \param[out]   psame
+ * \return  0 if OK, 1 on error
+ *
+ * <pre>
+ * Notes:
+ *      (1) This returns %same = TRUE if the colormaps have identical entries.
+ *      (2) If %ncomps == 4, the alpha components of the colormaps are also
+ *          compared.
+ * </pre>
+ */
+l_int32
+cmapEqual(PIXCMAP  *cmap1,
+          PIXCMAP  *cmap2,
+          l_int32   ncomps,
+          l_int32  *psame)
+{
+l_int32  n1, n2, i, rval1, rval2, gval1, gval2, bval1, bval2, aval1, aval2;
+
+    PROCNAME("cmapEqual");
+
+    if (!psame)
+        return ERROR_INT("&same not defined", procName, 1);
+    *psame = FALSE;
+    if (!cmap1)
+        return ERROR_INT("cmap1 not defined", procName, 1);
+    if (!cmap2)
+        return ERROR_INT("cmap2 not defined", procName, 1);
+    if (ncomps != 3 && ncomps != 4)
+        return ERROR_INT("ncomps not 3 or 4", procName, 1);
+
+    n1 = pixcmapGetCount(cmap1);
+    n2 = pixcmapGetCount(cmap2);
+    if (n1 != n2) {
+        L_INFO("colormap sizes are different\n", procName);
+        return 0;
+    }
+
+    for (i = 0; i < n1; i++) {
+        pixcmapGetRGBA(cmap1, i, &rval1, &gval1, &bval1, &aval1);
+        pixcmapGetRGBA(cmap2, i, &rval2, &gval2, &bval2, &aval2);
+        if (rval1 != rval2 || gval1 != gval2 || bval1 != bval2)
+            return 0;
+        if (ncomps == 4 && aval1 != aval2)
+            return 0;
+    }
+    *psame = TRUE;
     return 0;
 }
 
@@ -584,11 +618,16 @@ PIX      *pixn;
     tab8 = makePixelSumTab8();
     pixCountPixels(pix1, &count1, tab8);
     pixCountPixels(pix2, &count2, tab8);
+    if (count1 == 0 || count2 == 0) {
+        LEPT_FREE(tab8);
+        return 0;
+    }
     pixn = pixAnd(NULL, pix1, pix2);
     pixCountPixels(pixn, &countn, tab8);
     *pval = (l_float32)countn * (l_float32)countn /
               ((l_float32)count1 * (l_float32)count2);
     LEPT_FREE(tab8);
+    pixDestroy(&pixn);
     return 0;
 }
 
@@ -814,6 +853,8 @@ PIX     *pixt1, *pixt2;
  * Notes:
  *      (1) See pixCompareGrayOrRGB() for details.
  *      (2) Use pixCompareGrayOrRGB() if the input pix are colormapped.
+ *      (3) Note: setting %plottype > 0 can result in writing named
+ *                output files.
  * </pre>
  */
 l_int32
@@ -871,6 +912,7 @@ PIX            *pixt;
 
         /* Don't bother to plot if the images are the same */
     if (plottype && !same) {
+        L_INFO("Images differ: output plots will be generated\n", procName);
         na = pixGetGrayHistogram(pixt, 1);
         numaGetNonzeroRange(na, TINY, &first, &last);
         nac = numaClipToInterval(na, 0, last);
@@ -883,7 +925,7 @@ PIX            *pixt;
         gplotDestroy(&gplot);
         snprintf(buf, sizeof(buf), "/tmp/lept/comp/compare_gray%d.png",
                  index++);
-        l_fileDisplay(buf, 100, 100);
+        l_fileDisplay(buf, 100, 100, 1.0);
         numaDestroy(&na);
         numaDestroy(&nac);
     }
@@ -920,6 +962,8 @@ PIX            *pixt;
  * <pre>
  * Notes:
  *      (1) See pixCompareGrayOrRGB() for details.
+ *      (2) Note: setting %plottype > 0 can result in writing named
+ *                output files.
  * </pre>
  */
 l_int32
@@ -991,6 +1035,7 @@ PIX            *pixr, *pixg, *pixb;
 
         /* Don't bother to plot if the images are the same */
     if (plottype && !same) {
+        L_INFO("Images differ: output plots will be generated\n", procName);
         nar = pixGetGrayHistogram(pixr, 1);
         nag = pixGetGrayHistogram(pixg, 1);
         nab = pixGetGrayHistogram(pixb, 1);
@@ -1013,7 +1058,7 @@ PIX            *pixr, *pixg, *pixb;
         gplotDestroy(&gplot);
         snprintf(buf, sizeof(buf), "/tmp/lept/comp/compare_rgb%d.png",
                  index++);
-        l_fileDisplay(buf, 100, 100);
+        l_fileDisplay(buf, 100, 100, 1.0);
         numaDestroy(&nar);
         numaDestroy(&nag);
         numaDestroy(&nab);
@@ -1319,7 +1364,7 @@ l_float32   fractdiff, avediff;
  *                you then get a useful measure for the rate of falloff
  *                of the distribution for larger differences.  For example,
  *                if %mindiff = 10 and you find that %avediff = 2.5, it
- *                says that of the pixels with diff \> 10, the average of
+ *                says that of the pixels with diff > 10, the average of
  *                their diffs is just mindiff + 2.5 = 12.5.  This is a
  *                fast falloff in the histogram with increasing difference.
  *      (2) The two images are aligned at the UL corner, and do not
@@ -1550,7 +1595,7 @@ PIX        *pixt1, *pixt2;
  *      (5) The returned value of fract can be compared to some threshold,
  *          which is application dependent.
  *      (6) This method is in analogy to the two-sided hausdorff transform,
- *          except here it is for d \> 1.  For d == 1 (see pixRankHaustest()),
+ *          except here it is for d > 1.  For d == 1 (see pixRankHaustest()),
  *          we verify that when one pix1 is dilated, it covers at least a
  *          given fraction of the pixels in pix2, and v.v.; in that
  *          case, the two pix are sufficiently similar.  Here, we
@@ -1826,7 +1871,7 @@ l_float32  mse;  /* mean squared error */
  *          threshold %minratio.  If set at 1.0, both images must be
  *          exactly the same size.  A typical value for %minratio is 0.9.
  *      (3) The comparison score between two images is a value in [0.0 .. 1.0].
- *          If the comparison score \>= %simthresh, the images are placed in
+ *          If the comparison score >= %simthresh, the images are placed in
  *          the same similarity class.  Default value for %simthresh is 0.25.
  *      (4) An array %nai of similarity class indices for pix in the
  *          input pixa is returned.
@@ -1861,8 +1906,6 @@ NUMAA     **n3a;  /* array of naa */
 PIX        *pix;
 
     PROCNAME("pixaComparePhotoRegionsByHisto");
-
-    lept_mkdir("lept/comp");
 
     if (pscores) *pscores = NULL;
     if (ppixd) *ppixd = NULL;
@@ -1969,6 +2012,7 @@ PIX        *pix;
         fact = L_MAX(2, 1000 / n);
         pix3 = pixExpandReplicate(pix2, fact);
         fprintf(stderr, "Writing to /tmp/lept/comp/scorearray.png\n");
+        lept_mkdir("lept/comp");
         pixWrite("/tmp/lept/comp/scorearray.png", pix3, IFF_PNG);
         pixDestroy(&pix2);
         pixDestroy(&pix3);
@@ -2548,8 +2592,10 @@ NUMA      *na1, *na2, *nadist, *nascore;
     if (n != numaaGetCount(naa2))
         return ERROR_INT("naa1 and naa2 are different size", procName, 1);
 
-    lept_rmdir("lept/comptile");
-    lept_mkdir("lept/comptile");
+    if (pixadebug) {
+        lept_rmdir("lept/comptile");
+        lept_mkdir("lept/comptile");
+    }
 
     wratio = (w1 < w2) ? (l_float32)w1 / (l_float32)w2 :
              (l_float32)w2 / (l_float32)w1;
@@ -2649,7 +2695,7 @@ NUMA      *na1, *na2, *nadist, *nascore;
  *      (3) The lightest values in the histogram can be disregarded.
  *          Set %maxgray to the lightest value to be kept.  For example,
  *          to eliminate white (255), set %maxgray = 254.  %maxgray must
- *          be \>= 200.
+ *          be >= 200.
  *      (4) For an efficient representation of the histogram, normalize
  *          using a multiplicative factor so that the number in the
  *          maximum bucket is 255.  It then takes 256 bytes to store.

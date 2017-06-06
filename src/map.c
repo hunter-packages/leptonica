@@ -30,7 +30,7 @@
  *
  *  This is an interface for map and set functions, based on using
  *  red-black binary search trees.  Because these trees are sorted,
- *  the are O(nlogn) to build.  They allow logn insertion, find
+ *  they are O(nlogn) to build.  They allow logn insertion, find
  *  and deletion of elements.
  *
  *  Both the map and set are ordered by key value, with unique keys.
@@ -50,7 +50,7 @@
  *      [add elements to the map ...]
  *      L_AMAP_NODE  *n = l_amapGetFirst(m);
  *      while (n) {
- *          l_int32 val = n-\>value.itype;
+ *          l_int32 val = n->value.itype;
  *          // do something ...
  *          n = l_amapGetNext(n);
  *      }
@@ -63,10 +63,10 @@
  *      L_AMAP_NODE  *nn;
  *      while (n) {
  *          nn = l_amapGetNext(n);
- *          l_int32 val = n-\>value.itype;
- *          l_uint32 key = n-\>key.utype;
+ *          l_int32 val = n->value.itype;
+ *          l_uint32 key = n->key.utype;
  *          // do something ...
- *          l_amapDelete(m, n-\>key);
+ *          l_amapDelete(m, n->key);
  *          n = nn;
  *      }
  *

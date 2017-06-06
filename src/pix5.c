@@ -269,7 +269,7 @@ PIX       *pixt;
  *          fg pixels for the area, and the ratio is taken in the opposite
  *          order.
  *      (3) This is typically used for a single connected component.
- *          This always has a value \<= 1.0, and if the average distance
+ *          This always has a value <= 1.0, and if the average distance
  *          of a fg pixel from the nearest bg pixel is d, this has
  *          a value ~1/d.
  * </pre>
@@ -1035,10 +1035,13 @@ PIX     *pixd;
     boxGetGeometry(boxc, &bx, &by, &bw, &bh);
 
         /* Extract the block */
-    if ((pixd = pixCreate(bw, bh, d)) == NULL)
+    if ((pixd = pixCreate(bw, bh, d)) == NULL) {
+        boxDestroy(&boxc);
         return (PIX *)ERROR_PTR("pixd not made", procName, NULL);
+    }
     pixCopyResolution(pixd, pixs);
     pixCopyColormap(pixd, pixs);
+    pixCopyText(pixd, pixs);
     pixRasterop(pixd, 0, 0, bw, bh, PIX_SRC, pixs, bx, by);
 
     if (pboxc)
@@ -1299,16 +1302,21 @@ PIX     *pixd;
  *
  * <pre>
  * Notes:
- *      (1) This makes an arbitrary 1-component mask with a centered frame.
- *          All input fractional distances are from the outside of the
- *          image to the frame boundary, in units of the image half-width
+ *      (1) This makes an arbitrary 1-component mask with a centered fg
+ *          frame, which can have both an inner and an outer boundary.
+ *          All input fractional distances are measured from the image
+ *          border to the frame boundary, in units of the image half-width
  *          for hf1 and hf2 and the image half-height for vf1 and vf2.
- *          Input fractions are thus in [0.0 ... 1.0], with hf1 \<= hf2
- *          and vf1 \<= vf2.  Horizontal and vertical frame widths are
- *          independently specified.
- *      (2) Special case: to get a full fg mask, set all input values to 0.0.
- *          An empty fg mask has hf1 = vf1 = 1.0.
- *          A fg rectangle with no hole has hf2 == 1.0 or hv2 == 1.0.
+ *          The distances to the outer frame boundary are given by hf1
+ *          and vf1; to the inner frame boundary, by hf2 and vf2.
+ *          Input fractions are thus in [0.0 ... 1.0], with hf1 <= hf2
+ *          and vf1 <= vf2.  Horizontal and vertical frame widths are
+ *          thus independently specified.
+ *      (2) Special cases:
+ *           * full fg mask: hf1 = vf1 = 0.0, hf2 = vf2 = 1.0.
+ *           * empty fg (zero width) mask: set  hf1 = hf2  and vf1 = vf2.
+ *           * fg rectangle with no hole: set hf2 = vf2 = 1.0.
+ *           * frame touching outer boundary: set hf1 = vf1 = 0.0.
  *      (3) The vertical thickness of the horizontal mask parts
  *          is 0.5 * (vf2 - vf1) * h.  The horizontal thickness of the
  *          vertical mask parts is 0.5 * (hf2 - hf1) * w.
@@ -1339,11 +1347,11 @@ PIX     *pixd;
     pixd = pixCreate(w, h, 1);
 
         /* Special cases */
-    if (hf1 == 0.0 && hf2 == 0.0 && vf1 == 0.0 && vf2 == 0.0) {  /* full */
+    if (hf1 == 0.0 && vf1 == 0.0 && hf2 == 1.0 && vf2 == 1.0) {  /* full */
         pixSetAll(pixd);
         return pixd;
     }
-    if (hf1 == 1.0 && vf1 == 1.0) {  /* empty */
+    if (hf1 == hf2 && vf1 == vf2) {  /* empty */
         return pixd;
     }
 
@@ -1375,13 +1383,13 @@ PIX     *pixd;
  * Notes:
  *      (1) This gives the fraction of fg pixels in pix1 that are in
  *          the intersection (i.e., under the fg) of pix2:
- *          |1 \& 2|/|1|, where |...| means the number of fg pixels.
+ *          |1 & 2|/|1|, where |...| means the number of fg pixels.
  *          Note that this is different from the situation where
  *          pix1 and pix2 are reversed.
  *      (2) Both pix1 and pix2 are registered to the UL corners.  A warning
  *          is issued if pix1 and pix2 have different sizes.
  *      (3) This can also be used to find the fraction of fg pixels in pix1
- *          that are NOT under the fg of pix2: 1.0 - |1 \& 2|/|1|
+ *          that are NOT under the fg of pix2: 1.0 - |1 & 2|/|1|
  *      (4) If pix1 or pix2 are empty, this returns %fract = 0.0.
  *      (5) For example, pix2 could be a frame around the outside of the
  *          image, made from pixMakeFrameMask().
@@ -1439,7 +1447,7 @@ PIX     *pix3;
  *
  * <pre>
  * Notes:
- *      (1) At least one of {\&pixd, \&box} must be specified.
+ *      (1) At least one of {&pixd, &box} must be specified.
  *      (2) If there are no fg pixels, the returned ptrs are null.
  * </pre>
  */
@@ -1609,9 +1617,9 @@ l_uint32  *data, *line;
  *
  * <pre>
  * Notes:
- *      (1) At least one of {\&pixd, \&boxd} must be specified.
+ *      (1) At least one of {&pixd, &boxd} must be specified.
  *      (2) If there are no fg pixels, the returned ptrs are null.
- *      (3) Do not use \&pixs for the 3rd arg or \&boxs for the 4th arg;
+ *      (3) Do not use &pixs for the 3rd arg or &boxs for the 4th arg;
  *          this will leak memory.
  * </pre>
  */
@@ -1780,7 +1788,7 @@ BOX       *boxt;
  *
  * <pre>
  * Notes:
- *      (1) At least one of {\&pixd, \&boxd} must be specified.
+ *      (1) At least one of {&pixd, &boxd} must be specified.
  *      (2) If there are no fg pixels, the returned ptrs are null.
  *      (3) This function attempts to locate rectangular "image" regions
  *          of high-density fg pixels, that have well-defined edges
@@ -2222,8 +2230,8 @@ PTA       *pta;
  * Notes:
  *      (1) The line must be either horizontal or vertical, so either
  *          y1 == y2 (horizontal) or x1 == x2 (vertical).
- *      (2) If horizontal, x1 must be \<= x2.
- *          If vertical, y1 must be \<= y2.
+ *      (2) If horizontal, x1 must be <= x2.
+ *          If vertical, y1 must be <= y2.
  *          characterize the intensity smoothness along a line.
  *      (3) Input end points are clipped to the pix.
  * </pre>
@@ -2274,6 +2282,7 @@ l_float32  sum;
     data = pixGetData(pixs);
     wpl = pixGetWpl(pixs);
     sum = 0;
+    count = 0;
     if (direction == L_HORIZONTAL_LINE) {
         line = data + y1 * wpl;
         for (j = x1, count = 0; j <= x2; count++, j += factor) {

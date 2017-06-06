@@ -133,8 +133,10 @@ L_BBUFFER  *bb;
 
     if ((bb = (L_BBUFFER *)LEPT_CALLOC(1, sizeof(L_BBUFFER))) == NULL)
         return (L_BBUFFER *)ERROR_PTR("bb not made", procName, NULL);
-    if ((bb->array = (l_uint8 *)LEPT_CALLOC(nalloc, sizeof(l_uint8))) == NULL)
+    if ((bb->array = (l_uint8 *)LEPT_CALLOC(nalloc, sizeof(l_uint8))) == NULL) {
+        LEPT_FREE(bb);
         return (L_BBUFFER *)ERROR_PTR("byte array not made", procName, NULL);
+    }
     bb->nalloc = nalloc;
     bb->nwritten = 0;
 
@@ -351,8 +353,8 @@ l_int32  navail, nadd, nread, nwritten;
  *
  * <pre>
  * Notes:
- *      (1) reallocNew() copies all bb-\>nalloc bytes, even though
- *          only bb-\>n are data.
+ *      (1) reallocNew() copies all bb->nalloc bytes, even though
+ *          only bb->n are data.
  * </pre>
  */
 l_int32

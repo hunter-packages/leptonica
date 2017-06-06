@@ -39,6 +39,7 @@
  *           l_int32    regTestCheckFile()
  *           l_int32    regTestCompareFiles()
  *           l_int32    regTestWritePixAndCheck()
+ *           char      *regTestGenLocalFilename()
  *
  *       Static function
  *           char      *getRootNameFromArgv0()
@@ -49,7 +50,7 @@
  *  ...
  *  L_REGPARAMS  *rp;
  *
- *      if (regTestSetup(argc, argv, \&rp))
+ *      if (regTestSetup(argc, argv, &rp))
  *          return 1;
  *      ...
  *      regTestWritePixAndCheck(rp, pix, IFF_PNG);  // 0
@@ -128,8 +129,10 @@ L_REGPARAMS  *rp;
     if ((testname = getRootNameFromArgv0(argv[0])) == NULL)
         return ERROR_INT("invalid root", procName, 1);
 
-    if ((rp = (L_REGPARAMS *)LEPT_CALLOC(1, sizeof(L_REGPARAMS))) == NULL)
+    if ((rp = (L_REGPARAMS *)LEPT_CALLOC(1, sizeof(L_REGPARAMS))) == NULL) {
+        LEPT_FREE(testname);
         return ERROR_INT("rp not made", procName, 1);
+    }
     *prp = rp;
     rp->testname = testname;
     rp->index = -1;  /* increment before each test */
@@ -144,7 +147,7 @@ L_REGPARAMS  *rp;
         /* Only open a stream to a temp file for the 'compare' case */
     if (argc == 1 || !strcmp(argv[1], "compare")) {
         rp->mode = L_REG_COMPARE;
-        rp->tempfile = genPathname("/tmp/lept/regout", "regtest_output.txt");
+        rp->tempfile = stringNew("/tmp/lept/regout/regtest_output.txt");
         rp->fp = fopenWriteStream(rp->tempfile, "wb");
         if (rp->fp == NULL) {
             rp->success = FALSE;
@@ -234,7 +237,7 @@ size_t   nbytes;
         snprintf(result, sizeof(result), "FAILURE: %s_reg\n", rp->testname);
     message = stringJoin(text, result);
     LEPT_FREE(text);
-    results_file = genPathname("/tmp/lept", "reg_results.txt");
+    results_file = stringNew("/tmp/lept/reg_results.txt");
     fileAppendString(results_file, message);
     retval = (rp->success) ? 0 : 1;
     LEPT_FREE(results_file);
@@ -480,8 +483,8 @@ l_int32  w, h, factor, similar;
  *           * "compare": compares %localname contents with the golden file
  *           * "display": makes the %localname file but does no comparison
  *      (2) The canonical format of the golden filenames is:
- *            /tmp/lept/golden/\<root of main name\>_golden.\<index\>.
- *                                                       \<ext of localname\>
+ *            /tmp/lept/golden/<root of main name>_golden.<index>.
+ *                                                       <ext of localname>
  *          e.g.,
  *             /tmp/lept/golden/maze_golden.0.png
  *          It is important to add an extension to the local name, because
@@ -585,8 +588,8 @@ PIX     *pix1, *pix2;
  * Notes:
  *      (1) This only does something in "compare" mode.
  *      (2) The canonical format of the golden filenames is:
- *            /tmp/lept/golden/\<root of main name\>_golden.\<index\>.
- *                                                      \<ext of localname\>
+ *            /tmp/lept/golden/<root of main name>_golden.<index>.
+ *                                                      <ext of localname>
  *          e.g.,
  *            /tmp/lept/golden/maze_golden.0.png
  * </pre>
@@ -618,7 +621,7 @@ SARRAY  *sa;
     if (rp->mode != L_REG_COMPARE) return 0;
 
         /* Generate the golden file names */
-    snprintf(namebuf, sizeof(namebuf), "%s_golden.%02d.", rp->testname, index1);
+    snprintf(namebuf, sizeof(namebuf), "%s_golden.%02d", rp->testname, index1);
     sa = getSortedPathnamesInDirectory("/tmp/lept/golden", namebuf, 0, 0);
     if (sarrayGetCount(sa) != 1) {
         sarrayDestroy(&sa);
@@ -629,7 +632,7 @@ SARRAY  *sa;
     name1 = sarrayGetString(sa, 0, L_COPY);
     sarrayDestroy(&sa);
 
-    snprintf(namebuf, sizeof(namebuf), "%s_golden.%02d.", rp->testname, index2);
+    snprintf(namebuf, sizeof(namebuf), "%s_golden.%02d", rp->testname, index2);
     sa = getSortedPathnamesInDirectory("/tmp/lept/golden", namebuf, 0, 0);
     if (sarrayGetCount(sa) != 1) {
         sarrayDestroy(&sa);
@@ -674,10 +677,13 @@ SARRAY  *sa;
  *             (a) write the golden file ("generate" arg to regression test)
  *             (b) make a local file and "compare" with the golden file
  *             (c) make a local file and "display" the results
- *      (3) The canonical format of the local filename is:
- *            /tmp/lept/regout/\<root of main name\>.\<count\>.\<format extension\>
+ *      (2) The canonical format of the local filename is:
+ *            /tmp/lept/regout/<root of main name>.<count>.<format extension>
  *          e.g., for scale_reg,
  *            /tmp/lept/regout/scale.0.png
+ *      (3) The check is done between the written files, which requires
+ *          the files to be identical. The exception is for GIF, which
+ *          only requires that all pixels in the decoded pix are identical.
  * </pre>
  */
 l_int32
@@ -685,7 +691,7 @@ regTestWritePixAndCheck(L_REGPARAMS  *rp,
                         PIX          *pix,
                         l_int32       format)
 {
-char   namebuf[256];
+char  namebuf[256];
 
     PROCNAME("regTestWritePixAndCheck");
 
@@ -714,6 +720,44 @@ char   namebuf[256];
     regTestCheckFile(rp, namebuf);
 
     return 0;
+}
+
+
+/*!
+ * \brief   regTestGenLocalFilename()
+ *
+ * \param[in]       rp      regtest parameters
+ * \param[in]       index   use -1 for current index
+ * \param[in]       format  of image; e.g., IFF_PNG
+ * \return  filename if OK, or NULL on error
+ *
+ * <pre>
+ * Notes:
+ *      (1) This is used to get the name of a file in the regout
+ *          subdirectory, that has been made and is used to test against
+ *          the golden file.  You can either specify a particular index
+ *          value, or with %index == -1, this returns the most recently
+ *          written file.  The latter case lets you read a pix from a
+ *          file that has just been written with regTestWritePixAndCheck(),
+ *          which is useful for testing formatted read/write functions.
+ */
+char *
+regTestGenLocalFilename(L_REGPARAMS  *rp,
+                        l_int32       index,
+                        l_int32       format)
+{
+char     buf[64];
+l_int32  ind;
+
+    PROCNAME("regTestGenLocalFilename");
+
+    if (!rp)
+        return (char *)ERROR_PTR("rp not defined", procName, NULL);
+
+    ind = (index >= 0) ? index : rp->index;
+    snprintf(buf, sizeof(buf), "/tmp/lept/regout/%s.%02d.%s",
+             rp->testname, ind, ImageFileFormatExtensions[format]);
+    return stringNew(buf);
 }
 
 

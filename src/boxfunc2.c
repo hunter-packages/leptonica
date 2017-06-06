@@ -57,6 +57,7 @@
  *           BOXA            *boxaaFlattenToBoxa()
  *           BOXA            *boxaaFlattenAligned()
  *           BOXAA           *boxaEncapsulateAligned()
+ *           BOXAA           *boxaaTranspose()
  *           l_int32          boxaaAlignBox()
  * </pre>
  */
@@ -807,7 +808,7 @@ BOXA    *boxad;
  *          is overlapping are joined.  After that, the boxes in each
  *          boxa are sorted horizontally, and finally the boxa are
  *          sorted vertically.
- *      (3) If delta1 \< 0, the first pass allows aggregation when
+ *      (3) If delta1 < 0, the first pass allows aggregation when
  *          boxes in the same boxa do not overlap vertically.
  *          The distance by which they can miss and still be aggregated
  *          is the absolute value |delta1|.   Similar for delta2 on
@@ -818,6 +819,10 @@ BOXA    *boxad;
  *          with an existing boxa can start a new one.
  *      (6) This can be used to identify lines of text from
  *          character or word bounding boxes.
+ *      (7) Typical values for the input parameters on 300 ppi text are:
+ *                 delta1 ~ 0
+ *                 delta2 ~ 0
+ *                 minh1 ~ 5
  * </pre>
  */
 BOXAA *
@@ -1457,7 +1462,7 @@ BOXA    *boxa, *boxa1;
  *          where each boxa has either 0 or 1 boxes, and it is necessary
  *          to maintain a 1:1 correspondence between the initial
  *          boxa array and the resulting box array.
- *      (3) If \&naindex is defined, we generate a Numa that gives, for
+ *      (3) If &naindex is defined, we generate a Numa that gives, for
  *          each box in the baa, the index of the boxa to which it belongs.
  * </pre>
  */
@@ -1621,6 +1626,67 @@ BOXAA   *baa;
 
 
 /*!
+ * \brief   boxaaTranspose()
+ *
+ * \param[in]    baas
+ * \return  baad, or NULL on error
+ *
+ * <pre>
+ * Notes:
+ *      (1) If you think of a boxaa as a 2D array of boxes that is accessed
+ *          row major, then each row is represented by one of the boxa.
+ *          This function creates a new boxaa related to the input boxaa
+ *          as a column major traversal of the input boxaa.
+ *      (2) For example, if %baas has 2 boxa, each with 10 boxes, then
+ *          %baad will have 10 boxa, each with 2 boxes.
+ *      (3) Require for this transpose operation that each boxa in
+ *          %baas has the same number of boxes.  This operation is useful
+ *          when the i-th boxes in each boxa are meaningfully related.
+ * </pre>
+ */
+BOXAA *
+boxaaTranspose(BOXAA  *baas)
+{
+l_int32   i, j, ny, nb, nbox;
+BOX      *box;
+BOXA     *boxa;
+BOXAA    *baad;
+
+    PROCNAME("boxaaTranspose");
+
+    if (!baas)
+        return (BOXAA *)ERROR_PTR("baas not defined", procName, NULL);
+    if ((ny = boxaaGetCount(baas)) == 0)
+        return (BOXAA *)ERROR_PTR("baas empty", procName, NULL);
+
+        /* Make sure that each boxa in baas has the same number of boxes */
+    for (i = 0; i < ny; i++) {
+        if ((boxa = boxaaGetBoxa(baas, i, L_CLONE)) == NULL)
+            return (BOXAA *)ERROR_PTR("baas is missing a boxa", procName, NULL);
+        nb = boxaGetCount(boxa);
+        boxaDestroy(&boxa);
+        if (i == 0)
+            nbox = nb;
+        else if (nb != nbox)
+            return (BOXAA *)ERROR_PTR("boxa are not all the same size",
+                                      procName, NULL);
+    }
+
+        /* baad[i][j] = baas[j][i] */
+    baad = boxaaCreate(nbox);
+    for (i = 0; i < nbox; i++) {
+        boxa = boxaCreate(ny);
+        for (j = 0; j < ny; j++) {
+            box = boxaaGetBox(baas, j, i, L_COPY);
+            boxaAddBox(boxa, box, L_INSERT);
+        }
+        boxaaAddBoxa(baad, boxa, L_INSERT);
+    }
+    return baad;
+}
+
+
+/*!
  * \brief   boxaaAlignBox()
  *
  * \param[in]    baa
@@ -1649,6 +1715,7 @@ BOXA    *boxa;
 
     PROCNAME("boxaaAlignBox");
 
+    if (pindex) *pindex = 0;
     if (!baa)
         return ERROR_INT("baa not defined", procName, 1);
     if (!box)

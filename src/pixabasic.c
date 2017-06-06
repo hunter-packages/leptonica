@@ -56,7 +56,7 @@
  *           l_int32   pixaVerifyDepth()
  *           l_int32   pixaIsFull()
  *           l_int32   pixaCountText()
- *           l_int32   pixaClearText()
+ *           l_int32   pixaSetText()
  *           void   ***pixaGetLinePtrs()
  *
  *      Pixa output info
@@ -202,7 +202,7 @@ pixaCreateFromPix(PIX     *pixs,
                   l_int32  cellh)
 {
 l_int32  w, h, d, nw, nh, i, j, index;
-PIX     *pix, *pixt;
+PIX     *pix1, *pix2;
 PIXA    *pixa;
 
     PROCNAME("pixaCreateFromPix");
@@ -215,23 +215,25 @@ PIXA    *pixa;
     if ((pixa = pixaCreate(n)) == NULL)
         return (PIXA *)ERROR_PTR("pixa not made", procName, NULL);
     pixGetDimensions(pixs, &w, &h, &d);
-    if ((pixt = pixCreate(cellw, cellh, d)) == NULL)
-        return (PIXA *)ERROR_PTR("pixt not made", procName, NULL);
+    if ((pix1 = pixCreate(cellw, cellh, d)) == NULL) {
+        pixaDestroy(&pixa);
+        return (PIXA *)ERROR_PTR("pix1 not made", procName, NULL);
+    }
 
     nw = (w + cellw - 1) / cellw;
     nh = (h + cellh - 1) / cellh;
     for (i = 0, index = 0; i < nh; i++) {
         for (j = 0; j < nw && index < n; j++, index++) {
-            pixRasterop(pixt, 0, 0, cellw, cellh, PIX_SRC, pixs,
+            pixRasterop(pix1, 0, 0, cellw, cellh, PIX_SRC, pixs,
                    j * cellw, i * cellh);
-            if (d == 1 && !pixClipToForeground(pixt, &pix, NULL))
-                pixaAddPix(pixa, pix, L_INSERT);
+            if (d == 1 && !pixClipToForeground(pix1, &pix2, NULL))
+                pixaAddPix(pixa, pix2, L_INSERT);
             else
-                pixaAddPix(pixa, pixt, L_COPY);
+                pixaAddPix(pixa, pix1, L_COPY);
         }
     }
 
-    pixDestroy(&pixt);
+    pixDestroy(&pix1);
     return pixa;
 }
 
@@ -337,7 +339,7 @@ pixaSplitPix(PIX      *pixs,
              l_uint32  bordercolor)
 {
 l_int32  w, h, d, cellw, cellh, i, j;
-PIX     *pixt;
+PIX     *pix1;
 PIXA    *pixa;
 
     PROCNAME("pixaSplitPix");
@@ -356,21 +358,23 @@ PIXA    *pixa;
 
     for (i = 0; i < ny; i++) {
         for (j = 0; j < nx; j++) {
-            if ((pixt = pixCreate(cellw + 2 * borderwidth,
-                                  cellh + 2 * borderwidth, d)) == NULL)
-                return (PIXA *)ERROR_PTR("pixt not made", procName, NULL);
-            pixCopyColormap(pixt, pixs);
+            if ((pix1 = pixCreate(cellw + 2 * borderwidth,
+                                  cellh + 2 * borderwidth, d)) == NULL) {
+                pixaDestroy(&pixa);
+                return (PIXA *)ERROR_PTR("pix1 not made", procName, NULL);
+            }
+            pixCopyColormap(pix1, pixs);
             if (borderwidth == 0) {  /* initialize full image to white */
                 if (d == 1)
-                    pixClearAll(pixt);
+                    pixClearAll(pix1);
                 else
-                    pixSetAll(pixt);
+                    pixSetAll(pix1);
             } else {
-                pixSetAllArbitrary(pixt, bordercolor);
+                pixSetAllArbitrary(pix1, bordercolor);
             }
-            pixRasterop(pixt, borderwidth, borderwidth, cellw, cellh,
+            pixRasterop(pix1, borderwidth, borderwidth, cellw, cellh,
                         PIX_SRC, pixs, j * cellw, i * cellh);
-            pixaAddPix(pixa, pixt, L_INSERT);
+            pixaAddPix(pixa, pix1, L_INSERT);
         }
     }
 
@@ -960,7 +964,7 @@ l_int32  i, n, d, depth, maxdepth, same;
  * <pre>
  * Notes:
  *      (1) A pixa is "full" if the array of pix is fully
- *          occupied from index 0 to index (pixa-\>n - 1).
+ *          occupied from index 0 to index (pixa->n - 1).
  * </pre>
  */
 l_int32
@@ -1044,28 +1048,50 @@ PIX     *pix;
 
 
 /*!
- * \brief   pixaClearText()
+ * \brief   pixaSetText()
  *
  * \param[in]    pixa
+ * \param[in]    sa  [optional] array of text strings, to insert in each pix
  * \return  0 if OK, 1 on error.
+ *
+ * <pre>
+ * Notes:
+ *      (1) To clear all the text fields, use sa == NULL;
+ *      (2) If sa is defined, it must be the same size as %pixa.
+ * </pre>
  */
 l_int32
-pixaClearText(PIXA  *pixa)
+pixaSetText(PIXA    *pixa,
+            SARRAY  *sa)
 {
-char    *text;
+char    *str;
 l_int32  i, n;
 PIX     *pix;
 
-    PROCNAME("pixaClearText");
+    PROCNAME("pixaSetText");
 
     if (!pixa)
         return ERROR_INT("pixa not defined", procName, 1);
 
     n = pixaGetCount(pixa);
+    if (!sa) {
+        for (i = 0; i < n; i++) {
+            if ((pix = pixaGetPix(pixa, i, L_CLONE)) == NULL)
+                continue;
+            pixSetText(pix, NULL);
+            pixDestroy(&pix);
+        }
+        return 0;
+    }
+
+    if (sarrayGetCount(sa) != n)
+        return ERROR_INT("pixa and sa sizes differ", procName, 1);
+
     for (i = 0; i < n; i++) {
         if ((pix = pixaGetPix(pixa, i, L_CLONE)) == NULL)
             continue;
-        pixSetText(pix, NULL);
+        str = sarrayGetString(sa, i, L_NOCOPY);
+        pixSetText(pix, str);
         pixDestroy(&pix);
     }
 
@@ -1087,7 +1113,7 @@ PIX     *pix;
  *          The size of each line ptr array is equal to the height
  *          of the pix that it refers to.
  *      (3) This is an array of arrays.  To destroy it:
- *            for (i = 0; i \< size; i++)
+ *            for (i = 0; i < size; i++)
  *                LEPT_FREE(lineset[i]);
  *            LEPT_FREE(lineset);
  * </pre>
@@ -1239,7 +1265,7 @@ BOXA  *boxa;
  *
  * <pre>
  * Notes:
- *      (1) This shifts pixa[i] --\> pixa[i + 1] for all i \>= index,
+ *      (1) This shifts pixa[i] --> pixa[i + 1] for all i >= index,
  *          and then inserts at pixa[index].
  *      (2) To insert at the beginning of the array, set index = 0.
  *      (3) It should not be used repeatedly on large arrays,
@@ -1291,7 +1317,7 @@ l_int32  i, n;
  *
  * <pre>
  * Notes:
- *      (1) This shifts pixa[i] --\> pixa[i - 1] for all i \> index.
+ *      (1) This shifts pixa[i] --> pixa[i - 1] for all i > index.
  *      (2) It should not be used repeatedly on large arrays,
  *          because the function is O(n).
  *      (3) The corresponding box is removed as well, if it exists.
@@ -1342,7 +1368,7 @@ PIX    **array;
  *
  * <pre>
  * Notes:
- *      (1) This shifts pixa[i] --\> pixa[i - 1] for all i \> index.
+ *      (1) This shifts pixa[i] --> pixa[i - 1] for all i > index.
  *      (2) It should not be used repeatedly on large arrays,
  *          because the function is O(n).
  *      (3) The corresponding box is removed as well, if it exists.
@@ -1430,7 +1456,7 @@ pixaInitFull(PIXA  *pixa,
              BOX   *box)
 {
 l_int32  i, n;
-PIX     *pixt;
+PIX     *pix1;
 
     PROCNAME("pixaInitFull");
 
@@ -1441,10 +1467,10 @@ PIX     *pixt;
     pixa->n = n;
     for (i = 0; i < n; i++) {
         if (pix)
-            pixt = pixCopy(NULL, pix);
+            pix1 = pixCopy(NULL, pix);
         else
-            pixt = pixCreate(1, 1, 1);
-        pixaReplacePix(pixa, i, pixt, NULL);
+            pix1 = pixCreate(1, 1, 1);
+        pixaReplacePix(pixa, i, pix1, NULL);
     }
     if (box)
         boxaInitFull(pixa->boxa, box);
@@ -1499,8 +1525,8 @@ l_int32  i, n;
  * <pre>
  * Notes:
  *      (1) This appends a clone of each indicated pix in pixas to pixad
- *      (2) istart \< 0 is taken to mean 'read from the start' (istart = 0)
- *      (3) iend \< 0 means 'read to the end'
+ *      (2) istart < 0 is taken to mean 'read from the start' (istart = 0)
+ *      (3) iend < 0 means 'read to the end'
  *      (4) If pixas is NULL or contains no pix, this is a no-op.
  * </pre>
  */
@@ -1621,8 +1647,8 @@ PIXA    *pixad;
  * <pre>
  * Notes:
  *      (1) This appends a clone of each indicated pixa in paas to pixaad
- *      (2) istart \< 0 is taken to mean 'read from the start' (istart = 0)
- *      (3) iend \< 0 means 'read to the end'
+ *      (2) istart < 0 is taken to mean 'read from the start' (istart = 0)
+ *      (3) iend < 0 means 'read to the end'
  * </pre>
  */
 l_int32
@@ -2205,7 +2231,7 @@ PIXA    *pixa;
  *             Pixaa *paa = pixaaCreate(max);
  *             Pixa *pixa = pixaCreate(1);  // if you want little memory
  *             pixaaInitFull(paa, pixa);  // copy it to entire array
- *             pixaDestroy(\&pixa);  // no longer needed
+ *             pixaDestroy(&pixa);  // no longer needed
  *          The initialization allows the pixaa to always be properly filled.
  * </pre>
  */
@@ -2604,7 +2630,7 @@ FILE    *fp;
         return ERROR_INT("stream not opened", procName, 1);
     ret = pixaWriteStream(fp, pixa);
 #else
-    L_WARNING("work-around: writing to a temp file\n", procName);
+    L_INFO("work-around: writing to a temp file\n", procName);
   #ifdef _WIN32
     if ((fp = fopenWriteWinTempfile()) == NULL)
         return ERROR_INT("tmpfile stream not opened", procName, 1);
@@ -2636,6 +2662,7 @@ FILE    *fp;
 PIXA *
 pixaReadBoth(const char  *filename)
 {
+char    buf[32];
 char   *sname;
 PIXA   *pixa;
 PIXAC  *pac;
@@ -2648,13 +2675,15 @@ PIXAC  *pac;
     l_getStructStrFromFile(filename, L_STR_NAME, &sname);
     if (!sname)
         return (PIXA *)ERROR_PTR("struct name not found", procName, NULL);
+    snprintf(buf, sizeof(buf), "%s", sname);
+    LEPT_FREE(sname);
 
-    if (strcmp(sname, "Pixacomp") == 0) {
+    if (strcmp(buf, "Pixacomp") == 0) {
         if ((pac = pixacompRead(filename)) == NULL)
             return (PIXA *)ERROR_PTR("pac not made", procName, NULL);
         pixa = pixaCreateFromPixacomp(pac, L_COPY);
         pixacompDestroy(&pac);
-    } else if (strcmp(sname, "Pixa") == 0) {
+    } else if (strcmp(buf, "Pixa") == 0) {
         if ((pixa = pixaRead(filename)) == NULL)
             return (PIXA *)ERROR_PTR("pixa not made", procName, NULL);
     } else {
@@ -2803,18 +2832,23 @@ PIXAA   *paa;
 
     if ((paa = pixaaCreate(n)) == NULL)
         return (PIXAA *)ERROR_PTR("paa not made", procName, NULL);
-    if ((boxa = boxaReadStream(fp)) == NULL)
+    if ((boxa = boxaReadStream(fp)) == NULL) {
+        pixaaDestroy(&paa);
         return (PIXAA *)ERROR_PTR("boxa not made", procName, NULL);
+    }
     boxaDestroy(&paa->boxa);
     paa->boxa = boxa;
 
     for (i = 0; i < n; i++) {
         if ((fscanf(fp, "\n\n --------------- pixa[%d] ---------------\n",
                     &ignore)) != 1) {
+            pixaaDestroy(&paa);
             return (PIXAA *)ERROR_PTR("text reading", procName, NULL);
         }
-        if ((pixa = pixaReadStream(fp)) == NULL)
+        if ((pixa = pixaReadStream(fp)) == NULL) {
+            pixaaDestroy(&paa);
             return (PIXAA *)ERROR_PTR("pixa not read", procName, NULL);
+        }
         pixaaAddPixa(paa, pixa, L_INSERT);
     }
 
@@ -2973,7 +3007,7 @@ FILE    *fp;
         return ERROR_INT("stream not opened", procName, 1);
     ret = pixaaWriteStream(fp, paa);
 #else
-    L_WARNING("work-around: writing to a temp file\n", procName);
+    L_INFO("work-around: writing to a temp file\n", procName);
   #ifdef _WIN32
     if ((fp = fopenWriteWinTempfile()) == NULL)
         return ERROR_INT("tmpfile stream not opened", procName, 1);

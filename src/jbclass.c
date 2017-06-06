@@ -319,6 +319,7 @@ JBCLASSER  *classer;
     classer->sizehaus = size;
     classer->rankhaus = rank;
     classer->dahash = l_dnaHashCreate(5507, 4);  /* 5507 is prime */
+    classer->keep_pixaa = 1;  /* keep all components in pixaa */
     return classer;
 }
 
@@ -575,7 +576,6 @@ l_int32  n;
     classer->baseindex += n;
     numaAddNumber(classer->nacomps, n);
     classer->npages++;
-
     return 0;
 }
 
@@ -597,7 +597,6 @@ jbClassifyRankHaus(JBCLASSER  *classer,
                    PIXA       *pixas)
 {
 l_int32     n, nt, i, wt, ht, iclass, size, found, testval;
-l_int32    *sumtab;
 l_int32     npages, area1, area3;
 l_int32    *tab8;
 l_float32   rank, x1, y1, x2, y2;
@@ -651,7 +650,6 @@ SEL        *sel;
         /* Use these to save the class and page of each component. */
     naclass = classer->naclass;
     napage = classer->napage;
-    sumtab = makePixelSumTab8();
 
         /* Store the unbordered pix in a pixaa, in a hierarchical
          * set of arrays.  There is one pixa for each class,
@@ -812,7 +810,6 @@ SEL        *sel;
     }
     classer->nclass = pixaGetCount(pixat);
 
-    LEPT_FREE(sumtab);
     ptaDestroy(&pta);
     pixaDestroy(&pixa1);
     pixaDestroy(&pixa2);
@@ -1072,7 +1069,10 @@ l_uint8     byte;
 
         /* Generate the bordered pixa, which contains all the the
          * input components.  This will not be saved.   */
-    n = pixaGetCount(pixas);
+    if ((n = pixaGetCount(pixas)) == 0) {
+        L_WARNING("pixas is empty\n", procName);
+        return 0;
+    }
     pixa1 = pixaCreate(n);
     for (i = 0; i < n; i++) {
         pix = pixaGetPix(pixas, i, L_CLONE);
@@ -1093,8 +1093,6 @@ l_uint8     byte;
     pixcts = (l_int32 *)LEPT_CALLOC(n, sizeof(*pixcts));
     pixrowcts = (l_int32 **)LEPT_CALLOC(n, sizeof(*pixrowcts));
     centtab = makePixelCentroidTab8();
-    if (!pixcts || !pixrowcts || !centtab)
-        return ERROR_INT("calloc fail in pix*cts or centtab", procName, 1);
 
         /* Count the "1" pixels in each row of the pix in pixa1; this
          * allows pixCorrelationScoreThresholded to abort early if a match
@@ -1135,8 +1133,13 @@ l_uint8     byte;
             ysum += rowcount * y;
         }
         pixcts[i] = downcount;
-        ptaAddPt(pta,
+        if (downcount > 0) {
+            ptaAddPt(pta,
                  xsum / (l_float32)downcount, ysum / (l_float32)downcount);
+        } else {  /* no pixels; shouldn't happen */
+            L_ERROR("downcount == 0 !\n", procName);
+            ptaAddPt(pta, pixGetWidth(pix) / 2, pixGetHeight(pix) / 2);
+        }
         pixDestroy(&pix);
     }
 
@@ -1434,7 +1437,7 @@ PIXA      *pixa, *pixat;
  *          pixWordBoxesByDilation() for further filtering of the word boxes.
  *      (2) For 75 to 150 ppi, the optimal dilation will be between 5 and 11.
  *          For 200 to 300 ppi, it is advisable to use a larger value
- *          for %maxdil, say between 10 and 20.  Setting maxdil \<= 0
+ *          for %maxdil, say between 10 and 20.  Setting maxdil <= 0
  *          results in a default dilation of 16.
  *      (3) The best size for dilating to get word masks is optionally returned.
  * </pre>
@@ -1758,14 +1761,13 @@ JBCLASSER  *classer;
 
     PROCNAME("jbClasserCreate");
 
-    if ((classer = (JBCLASSER *)LEPT_CALLOC(1, sizeof(JBCLASSER))) == NULL)
-        return (JBCLASSER *)ERROR_PTR("classer not made", procName, NULL);
     if (method != JB_RANKHAUS && method != JB_CORRELATION)
-        return (JBCLASSER *)ERROR_PTR("invalid type", procName, NULL);
+        return (JBCLASSER *)ERROR_PTR("invalid method", procName, NULL);
     if (components != JB_CONN_COMPS && components != JB_CHARACTERS &&
         components != JB_WORDS)
-        return (JBCLASSER *)ERROR_PTR("invalid type", procName, NULL);
+        return (JBCLASSER *)ERROR_PTR("invalid component", procName, NULL);
 
+    classer = (JBCLASSER *)LEPT_CALLOC(1, sizeof(JBCLASSER));
     classer->method = method;
     classer->components = components;
     classer->nacomps = numaCreate(0);
@@ -1779,7 +1781,6 @@ JBCLASSER  *classer;
     classer->naclass = numaCreate(0);
     classer->napage = numaCreate(0);
     classer->ptaul = ptaCreate(0);
-
     return classer;
 }
 
@@ -1858,8 +1859,7 @@ PIX     *pix;
     if (!pix)
         return (JBDATA *)ERROR_PTR("data not made", procName, NULL);
 
-    if ((data = (JBDATA *)LEPT_CALLOC(1, sizeof(JBDATA))) == NULL)
-        return (JBDATA *)ERROR_PTR("data not made", procName, NULL);
+    data = (JBDATA *)LEPT_CALLOC(1, sizeof(JBDATA));
     data->pix = pix;
     data->npages = classer->npages;
     data->w = classer->w;
@@ -1870,7 +1870,6 @@ PIX     *pix;
     data->naclass = numaClone(classer->naclass);
     data->napage = numaClone(classer->napage);
     data->ptaul = ptaClone(classer->ptaul);
-
     return data;
 }
 
@@ -1980,7 +1979,7 @@ char      fname[L_BUF_SIZE];
 char     *linestr;
 l_uint8  *data;
 l_int32   nsa, i, w, h, cellw, cellh, x, y, iclass, ipage;
-l_int32   npages, nclass, ncomp;
+l_int32   npages, nclass, ncomp, ninit;
 size_t    size;
 JBDATA   *jbdata;
 NUMA     *naclass, *napage;
@@ -1998,15 +1997,24 @@ SARRAY   *sa;
         return (JBDATA *)ERROR_PTR("pix not read", procName, NULL);
 
     snprintf(fname, L_BUF_SIZE, "%s%s", rootname, JB_DATA_EXT);
-    if ((data = l_binaryRead(fname, &size)) == NULL)
+    if ((data = l_binaryRead(fname, &size)) == NULL) {
+        pixDestroy(&pixs);
         return (JBDATA *)ERROR_PTR("data not read", procName, NULL);
+    }
 
-    if ((sa = sarrayCreateLinesFromString((char *)data, 0)) == NULL)
+    if ((sa = sarrayCreateLinesFromString((char *)data, 0)) == NULL) {
+        pixDestroy(&pixs);
+        LEPT_FREE(data);
         return (JBDATA *)ERROR_PTR("sa not made", procName, NULL);
+    }
     nsa = sarrayGetCount(sa);   /* number of cc + 6 */
     linestr = sarrayGetString(sa, 0, L_NOCOPY);
-    if (strcmp(linestr, "jb data file"))
+    if (strcmp(linestr, "jb data file")) {
+        pixDestroy(&pixs);
+        LEPT_FREE(data);
+        sarrayDestroy(&sa);
         return (JBDATA *)ERROR_PTR("invalid jb data file", procName, NULL);
+    }
     linestr = sarrayGetString(sa, 1, L_NOCOPY);
     sscanf(linestr, "num pages = %d", &npages);
     linestr = sarrayGetString(sa, 2, L_NOCOPY);
@@ -2026,12 +2034,14 @@ SARRAY   *sa;
     fprintf(stderr, "template lattice size: w = %d, h = %d\n", cellw, cellh);
 #endif
 
-    if ((naclass = numaCreate(ncomp)) == NULL)
-        return (JBDATA *)ERROR_PTR("naclass not made", procName, NULL);
-    if ((napage = numaCreate(ncomp)) == NULL)
-        return (JBDATA *)ERROR_PTR("napage not made", procName, NULL);
-    if ((ptaul = ptaCreate(ncomp)) == NULL)
-        return (JBDATA *)ERROR_PTR("pta not made", procName, NULL);
+    ninit = ncomp;
+    if (ncomp > 1000000) {  /* fuzz protection */
+        L_WARNING("ncomp > 1M\n", procName);
+        ninit = 1000000;
+    }
+    naclass = numaCreate(ninit);
+    napage = numaCreate(ninit);
+    ptaul = ptaCreate(ninit);
     for (i = 6; i < nsa; i++) {
         linestr = sarrayGetString(sa, i, L_NOCOPY);
         sscanf(linestr, "%d %d %d %d\n", &ipage, &iclass, &x, &y);
@@ -2040,8 +2050,7 @@ SARRAY   *sa;
         ptaAddPt(ptaul, x, y);
     }
 
-    if ((jbdata = (JBDATA *)LEPT_CALLOC(1, sizeof(JBDATA))) == NULL)
-        return (JBDATA *)ERROR_PTR("data not made", procName, NULL);
+    jbdata = (JBDATA *)LEPT_CALLOC(1, sizeof(JBDATA));
     jbdata->pix = pixs;
     jbdata->npages = npages;
     jbdata->w = w;
@@ -2119,8 +2128,10 @@ PTA      *ptaul;
     }
 
         /* Put the class templates into a pixa. */
-    if ((pixat = pixaCreateFromPix(pixt, nclass, cellw, cellh)) == NULL)
+    if ((pixat = pixaCreateFromPix(pixt, nclass, cellw, cellh)) == NULL) {
+        pixaDestroy(&pixad);
         return (PIXA *)ERROR_PTR("pixat not made", procName, NULL);
+    }
 
         /* Place each component in the right location on its page. */
     for (i = 0; i < ncomp; i++) {
@@ -2170,7 +2181,7 @@ PTA      *ptaul;
  *      (2) The array fields ptac and ptact give the centroids of
  *          those components relative to the UL corner of each component.
  *          Here, we compute the difference in each component, round to
- *          nearest integer, and correct the box-\>x and box-\>y by
+ *          nearest integer, and correct the box->x and box->y by
  *          the appropriate integral difference.
  *      (3) The templates and stored instances are all bordered.
  * </pre>
@@ -2219,8 +2230,10 @@ PTA       *ptac, *ptact, *ptaul;
             idely = (l_int32)(dely + 0.5);
         else
             idely = (l_int32)(dely - 0.5);
-        if ((box = boxaGetBox(boxa, i, L_CLONE)) == NULL)
+        if ((box = boxaGetBox(boxa, i, L_CLONE)) == NULL) {
+            LEPT_FREE(sumtab);
             return ERROR_INT("box not found", procName, 1);
+        }
         boxGetGeometry(box, &x, &y, NULL, NULL);
 
             /* Get final increments dx and dy for best alignment */
@@ -2358,7 +2371,6 @@ JBFINDCTX  *state;
     state->w = pixGetWidth(pixs) - 2 * JB_ADDED_PIXELS;
     state->h = pixGetHeight(pixs) - 2 * JB_ADDED_PIXELS;
     state->classer = classer;
-
     return state;
 }
 
@@ -2496,8 +2508,7 @@ BOX     *box;
     *pdx = *pdy = 0;
 
         /* Use JB_ADDED_PIXELS pixels padding on each side */
-    w = pixGetWidth(pixt);
-    h = pixGetHeight(pixt);
+    pixGetDimensions(pixt, &w, &h, NULL);
     box = boxCreate(x - idelx - JB_ADDED_PIXELS,
                     y - idely - JB_ADDED_PIXELS, w, h);
     pixi = pixClipRectangle(pixs, box, NULL);

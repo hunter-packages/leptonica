@@ -38,6 +38,7 @@
  *           PIX             *pixDrawBoxa()
  *           PIX             *pixDrawBoxaRandom()
  *           PIX             *boxaaDisplay()
+ *           PIXA            *pixaDisplayBoxaa()
  *
  *      Split mask components into Boxa
  *           BOXA            *pixSplitIntoBoxa()
@@ -99,6 +100,7 @@ PIX   *pixd;
 
     PROCNAME("pixMaskConnComp");
 
+    if (pboxa) *pboxa = NULL;
     if (!pixs || pixGetDepth(pixs) != 1)
         return (PIX *)ERROR_PTR("pixs undefined or not 1 bpp", procName, NULL);
     if (connectivity != 4 && connectivity != 8)
@@ -603,17 +605,31 @@ PTAA     *ptaa;
 /*!
  * \brief   boxaaDisplay()
  *
- * \param[in]    baa
- * \param[in]    linewba line width to display boxa
- * \param[in]    linewb line width to display box
- * \param[in]    colorba color to display boxa
- * \param[in]    colorb color to display box
- * \param[in]    w of pix; use 0 if determined by baa
- * \param[in]    h of pix; use 0 if determined by baa
+ * \param[in]    pixs     [optional] 1 bpp
+ * \param[in]    baa      boxaa, typically from a 2d sort
+ * \param[in]    linewba  line width to display outline of each boxa
+ * \param[in]    linewb   line width to display outline of each box
+ * \param[in]    colorba  color to display boxa
+ * \param[in]    colorb   color to display box
+ * \param[in]    w    width of outupt pix; use 0 if determined by %pixs or %baa
+ * \param[in]    h    height of outupt pix; use 0 if determined by %pixs or %baa
  * \return  0 if OK, 1 on error
+ * 
+ * <pre>
+ * Notes:
+ *      (1) If %pixs exists, this renders the boxes over an 8 bpp version
+ *          of it.  Otherwise, it renders the boxes over an empty image
+ *          with a white background.
+ *      (2) If %pixs exists, the dimensions of %pixd are the same,
+ *          and input values of %w and %h are ignored.
+ *          If %pixs is NULL, the dimensions of %pixd are determined by
+ *            - %w and %h if both are > 0, or
+ *            - the minimum size required using all boxes in %baa.
+ * </pre>
  */
 PIX *
-boxaaDisplay(BOXAA    *baa,
+boxaaDisplay(PIX      *pixs,
+             BOXAA    *baa,
              l_int32   linewba,
              l_int32   linewb,
              l_uint32  colorba,
@@ -624,22 +640,32 @@ boxaaDisplay(BOXAA    *baa,
 l_int32   i, j, n, m, rbox, gbox, bbox, rboxa, gboxa, bboxa;
 BOX      *box;
 BOXA     *boxa;
-PIX      *pix;
+PIX      *pixd;
 PIXCMAP  *cmap;
 
     PROCNAME("boxaaDisplay");
 
     if (!baa)
         return (PIX *)ERROR_PTR("baa not defined", procName, NULL);
-    if (w == 0 || h == 0)
-        boxaaGetExtent(baa, &w, &h, NULL, NULL);
 
-    pix = pixCreate(w, h, 8);
-    cmap = pixcmapCreate(8);
-    pixSetColormap(pix, cmap);
+    if (w <= 0 || h <= 0) {
+        if (pixs)
+            pixGetDimensions(pixs, &w, &h, NULL);
+        else
+            boxaaGetExtent(baa, &w, &h, NULL, NULL);
+    }
+
+    if (pixs) {
+        pixd = pixConvertTo8(pixs, 1);
+        cmap = pixGetColormap(pixd);
+    } else {
+        pixd = pixCreate(w, h, 8);
+        cmap = pixcmapCreate(8);
+        pixSetColormap(pixd, cmap);
+        pixcmapAddColor(cmap, 255, 255, 255);
+    }
     extractRGBValues(colorb, &rbox, &gbox, &bbox);
     extractRGBValues(colorba, &rboxa, &gboxa, &bboxa);
-    pixcmapAddColor(cmap, 255, 255, 255);
     pixcmapAddColor(cmap, rbox, gbox, bbox);
     pixcmapAddColor(cmap, rboxa, gboxa, bboxa);
 
@@ -647,18 +673,122 @@ PIXCMAP  *cmap;
     for (i = 0; i < n; i++) {
         boxa = boxaaGetBoxa(baa, i, L_CLONE);
         boxaGetExtent(boxa, NULL, NULL, &box);
-        pixRenderBoxArb(pix, box, linewba, rboxa, gboxa, bboxa);
+        pixRenderBoxArb(pixd, box, linewba, rboxa, gboxa, bboxa);
         boxDestroy(&box);
         m = boxaGetCount(boxa);
         for (j = 0; j < m; j++) {
             box = boxaGetBox(boxa, j, L_CLONE);
-            pixRenderBoxArb(pix, box, linewb, rbox, gbox, bbox);
+            pixRenderBoxArb(pixd, box, linewb, rbox, gbox, bbox);
             boxDestroy(&box);
         }
         boxaDestroy(&boxa);
     }
 
-    return pix;
+    return pixd;
+}
+
+
+/*!
+ * \brief   pixaDisplayBoxaa()
+ *
+ * \param[in]    pixas any depth, can be cmapped
+ * \param[in]    baa  boxes to draw on input pixa
+ * \param[in]    colorflag  (L_DRAW_RED, L_DRAW_GREEN, etc)
+ * \param[in]    width thickness of lines
+ * \return  pixa with box outlines drawn on each pix, or NULL on error
+ *
+ * <pre>
+ * Notes:
+ *      (1) All pix in %pixas that are not rgb are converted to rgb.
+ *      (2) Each boxa in @baa contains boxes that will be drawn on
+ *          the corresponding pix in %pixas.
+ *      (3) The color of the boxes drawn on each pix are selected with
+ *          %colorflag:
+ *            * For red, green or blue: use L_DRAW_RED, etc.
+ *            * For sequential r, g, b: use L_DRAW_RGB
+ *            * For random colors: use L_DRAW_RANDOM
+ * </pre>
+ */
+PIXA *
+pixaDisplayBoxaa(PIXA    *pixas,
+                 BOXAA   *baa,
+                 l_int32  colorflag,
+                 l_int32  width)
+{
+l_int32    i, j, nba, n, nbox, rval, gval, bval;
+l_uint32   color;
+l_uint32   colors[255];
+l_float64  dval;
+BOXA      *boxa;
+BOX       *box;
+PIX       *pix;
+PIXA      *pixad;
+
+    PROCNAME("pixaDisplayBoxaa");
+
+    if (!pixas)
+        return (PIXA *)ERROR_PTR("pixas not defined", procName, NULL);
+    if (!baa)
+        return (PIXA *)ERROR_PTR("baa not defined", procName, NULL);
+    if (width < 1)
+        return (PIXA *)ERROR_PTR("width must be >= 1", procName, NULL);
+    if ((nba = boxaaGetCount(baa)) < 1)
+        return (PIXA *)ERROR_PTR("no boxa in baa", procName, NULL);
+    if ((n = pixaGetCount(pixas)) == 0)
+        return (PIXA *)ERROR_PTR("no pix in pixas", procName, NULL);
+    if (n != nba)
+        return (PIXA *)ERROR_PTR("num pix != num boxa", procName, NULL);
+    if (colorflag == L_DRAW_RED)
+        color = 0xff000000;
+    else if (colorflag == L_DRAW_GREEN)
+        color = 0x00ff0000;
+    else if (colorflag == L_DRAW_BLUE)
+        color = 0x0000ff00;
+    else if (colorflag == L_DRAW_RGB)
+        color = 0x000000ff;
+    else if (colorflag == L_DRAW_RANDOM)
+        color = 0x00000000;
+    else
+        return (PIXA *)ERROR_PTR("invalid colorflag", procName, NULL);
+
+    if (colorflag == L_DRAW_RED || colorflag == L_DRAW_GREEN ||
+        colorflag == L_DRAW_BLUE) {
+        for (i = 0; i < 255; i++)
+            colors[i] = color;
+    } else if (colorflag == L_DRAW_RGB) {
+        for (i = 0; i < 255; i++) {
+            if (i % 3 == L_DRAW_RED)
+                colors[i] = 0xff000000;
+            else if (i % 3 == L_DRAW_GREEN)
+                colors[i] = 0x00ff0000;
+            else  /* i % 3 == L_DRAW_BLUE) */
+                colors[i] = 0x0000ff00;
+        }
+    } else if (colorflag == L_DRAW_RANDOM) {
+        for (i = 0; i < 255; i++) {
+            rval = (l_uint32)rand() & 0xff;
+            gval = (l_uint32)rand() & 0xff;
+            bval = (l_uint32)rand() & 0xff;
+            composeRGBPixel(rval, gval, bval, &colors[i]);
+        }
+    }
+
+    pixad = pixaCreate(n);
+    for (i = 0; i < n; i++) {
+        pix = pixaGetPix(pixas, i, L_COPY);
+        boxa = boxaaGetBoxa(baa, i, L_CLONE);
+        nbox = boxaGetCount(boxa);
+        for (j = 0; j < nbox; j++) {
+            box = boxaGetBox(boxa, j, L_CLONE);
+            extractRGBValues(colors[j % 255], &rval, &gval, &bval);
+            pixRenderBoxArb(pix, box, width, rval, gval, bval);
+            boxDestroy(&box);
+        }
+        boxaDestroy(&boxa);
+        pixaAddPix(pixad, pix, L_INSERT);
+    }
+
+    return pixad;
 }
 
 
@@ -791,7 +921,7 @@ PIXA    *pixas;
  *      (6) The flag %remainder specifies whether we take a final bounding
  *          box for anything left after the maximum number of allowed
  *          rectangle is extracted.
- *      (7) So if %maxcomps \> 0, it specifies that we want no more than
+ *      (7) So if %maxcomps > 0, it specifies that we want no more than
  *          the first %maxcomps rectangles that satisfy the input
  *          criteria.  After this, we can get a final rectangle that
  *          bounds everything left over by setting %remainder == 1.
@@ -801,7 +931,7 @@ PIXA    *pixas;
  *          break the original c.c. into several c.c.
  *      (9) Summing up:
  *            * If %maxcomp == 0, the splitting proceeds as far as possible.
- *            * If %maxcomp \> 0, the splitting stops when %maxcomps are
+ *            * If %maxcomp > 0, the splitting stops when %maxcomps are
  *                found, or earlier if no more components can be selected.
  *            * If %remainder == 1 and components remain that cannot be
  *                selected, they are returned as a single final rectangle;
@@ -1165,7 +1295,7 @@ success:
  * Notes:
  *      (1) For example, this can be used to generate a pixa of
  *          vertical strips of width 10 from an image, using:
- *             pixGetDimensions(pix, \&w, \&h, NULL);
+ *             pixGetDimensions(pix, &w, &h, NULL);
  *             boxa = makeMosaicStrips(w, h, L_SCAN_HORIZONTAL, 10);
  *             pixa = pixClipRectangles(pix, boxa);
  *          All strips except the last will be the same width.  The
@@ -1271,16 +1401,16 @@ PIXA     *pixa;
 
     PROCNAME("boxaCompareRegions");
 
-    if (!pnsame)
-        return ERROR_INT("&nsame not defined", procName, 1);
-    *pnsame = FALSE;
-    if (!pdiffarea)
-        return ERROR_INT("&diffarea not defined", procName, 1);
-    *pdiffarea = 1.0;
-    if (!boxa1 || !boxa2)
-        return ERROR_INT("boxa1 and boxa2 not both defined", procName, 1);
     if (pdiffxor) *pdiffxor = 1.0;
     if (ppixdb) *ppixdb = NULL;
+    if (pnsame) *pnsame = FALSE;
+    if (pdiffarea) *pdiffarea = 1.0;
+    if (!boxa1 || !boxa2)
+        return ERROR_INT("boxa1 and boxa2 not both defined", procName, 1);
+    if (!pnsame)
+        return ERROR_INT("&nsame not defined", procName, 1);
+    if (!pdiffarea)
+        return ERROR_INT("&diffarea not defined", procName, 1);
 
     boxa3 = boxaSelectByArea(boxa1, areathresh, L_SELECT_IF_GTE, NULL);
     boxa4 = boxaSelectByArea(boxa2, areathresh, L_SELECT_IF_GTE, NULL);
@@ -1384,7 +1514,7 @@ PIXA     *pixa;
  * Notes:
  *      (1) This selects a box near the top (first) and left (second)
  *          of the image, from the set of all boxes that have
- *                area \>= %areaslop * (area of biggest box),
+ *                area >= %areaslop * (area of biggest box),
  *          where %areaslop is some fraction; say ~ 0.9.
  *      (2) For all boxes satisfying the above condition, select
  *          the left-most box that is within %yslop (say, 20) pixels

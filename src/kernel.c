@@ -763,13 +763,19 @@ L_KERNEL  *kel;
     if (!filename)
         return (L_KERNEL *)ERROR_PTR("filename not defined", procName, NULL);
 
-    filestr = (char *)l_binaryRead(filename, &size);
+    if ((filestr = (char *)l_binaryRead(filename, &size)) == NULL)
+        return (L_KERNEL *)ERROR_PTR("file not found", procName, NULL);
+    if (size == 0) {
+        LEPT_FREE(filestr);
+        return (L_KERNEL *)ERROR_PTR("file is empty", procName, NULL);
+    }
+
     sa = sarrayCreateLinesFromString(filestr, 1);
     LEPT_FREE(filestr);
     nlines = sarrayGetCount(sa);
 
         /* Find the first data line. */
-    for (i = 0; i < nlines; i++) {
+    for (i = 0, first = 0; i < nlines; i++) {
         line = sarrayGetString(sa, i, L_NOCOPY);
         if (line[0] != '#') {
             first = i;
@@ -1202,7 +1208,7 @@ makeGaussianKernelSep(l_int32    halfheight,
  *      (4) The halfwidth and halfheight are typically equal, and
  *          are typically several times larger than the standard deviation.
  *      (5) The ratio is the ratio of standard deviations of the wide
- *          to narrow gaussian.  It must be \>= 1.0; 1.0 is a no-op.
+ *          to narrow gaussian.  It must be >= 1.0; 1.0 is a no-op.
  *      (6) Because the kernel is a null sum, it must be invoked without
  *          normalization in pixConvolve().
  * </pre>

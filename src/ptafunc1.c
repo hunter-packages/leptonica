@@ -36,6 +36,7 @@
  *           PTA      *ptaReverse()
  *           PTA      *ptaTranspose()
  *           PTA      *ptaCyclicPerm()
+ *           PTA      *ptaSelectRange()
  *
  *      Geometric
  *           BOX      *ptaGetBoundingRegion()
@@ -51,6 +52,7 @@
  *      Min/max and filtering
  *           l_int32   ptaGetMinMax()
  *           PTA      *ptaSelectByValue()
+ *           PTA      *ptaCropToMask()
  *
  *      Least Squares Fit
  *           l_int32   ptaGetLinearLSF()
@@ -70,8 +72,13 @@
  *           PIX      *pixGenerateFromPta()
  *           PTA      *ptaGetBoundaryPixels()
  *           PTAA     *ptaaGetBoundaryPixels()
- *           PTAA     *ptaaIndexLabelledPixels()
+ *           PTAA     *ptaaIndexLabeledPixels()
  *           PTA      *ptaGetNeighborPixLocs()
+ *
+ *      Interconversion with Numa
+ *           PTA      *numaConvertToPta1()
+ *           PTA      *numaConvertToPta2()
+ *           l_int32   ptaConvertToNuma()
  *
  *      Display Pta and Ptaa
  *           PIX      *pixDisplayPta()
@@ -138,8 +145,8 @@ PTA       *ptad;
  *
  * <pre>
  * Notes:
- *      (1) istart \< 0 is taken to mean 'read from the start' (istart = 0)
- *      (2) iend \< 0 means 'read to the end'
+ *      (1) istart < 0 is taken to mean 'read from the start' (istart = 0)
+ *      (2) iend < 0 means 'read to the end'
  *      (3) if ptas == NULL, this is a no-op
  * </pre>
  */
@@ -186,8 +193,8 @@ l_int32  n, i, x, y;
  *
  * <pre>
  * Notes:
- *      (1) istart \< 0 is taken to mean 'read from the start' (istart = 0)
- *      (2) iend \< 0 means 'read to the end'
+ *      (1) istart < 0 is taken to mean 'read from the start' (istart = 0)
+ *      (2) iend < 0 means 'read to the end'
  *      (3) if ptas == NULL, this is a no-op
  * </pre>
  */
@@ -351,6 +358,48 @@ PTA     *ptad;
     }
     ptaAddPt(ptad, xs, ys);
 
+    return ptad;
+}
+
+
+/*!
+ * \brief   ptaSelectRange()
+ *
+ * \param[in]    ptas
+ * \param[in]    first    use 0 to select from the beginning
+ * \param[in]    last     use 0 to select to the end
+ * \return  ptad, or NULL on error
+ */
+PTA *
+ptaSelectRange(PTA     *ptas,
+               l_int32  first,
+               l_int32  last)
+{
+l_int32    n, npt, i;
+l_float32  x, y;
+PTA       *ptad;
+
+    PROCNAME("ptaSelectRange");
+
+    if (!ptas)
+        return (PTA *)ERROR_PTR("ptas not defined", procName, NULL);
+    if ((n = ptaGetCount(ptas)) == 0) {
+        L_WARNING("ptas is empty\n", procName);
+        return ptaCopy(ptas);
+    }
+    first = L_MAX(0, first);
+    if (last <= 0) last = n - 1;
+    if (first >= n)
+        return (PTA *)ERROR_PTR("invalid first", procName, NULL);
+    if (first > last)
+        return (PTA *)ERROR_PTR("first > last", procName, NULL);
+
+    npt = last - first + 1;
+    ptad = ptaCreate(npt);
+    for (i = first; i <= last; i++) {
+        ptaGetPt(ptas, i, &x, &y);
+        ptaAddPt(ptad, x, y);
+    }
     return ptad;
 }
 
@@ -755,7 +804,7 @@ l_float32  sum, x1, y1, x2, y2, xp1, yp1, xp2, yp2;
  * Notes:
  *      (1) This gives the angle between two vectors, going between
  *          vector1 (x1,y1) and vector2 (x2,y2).  The angle is swept
- *          out from 1 --\> 2.  If this is clockwise, the angle is
+ *          out from 1 --> 2.  If this is clockwise, the angle is
  *          positive, but the result is folded into the interval [-pi, pi].
  * </pre>
  */
@@ -902,6 +951,44 @@ PTA       *ptad;
 }
 
 
+/*!
+ * \brief   ptaCropToMask()
+ *
+ * \param[in]    ptas  input pta
+ * \param[in]    pixm  1 bpp mask
+ * \return  ptad  with only pts under the mask fg, or NULL on error
+ */
+PTA *
+ptaCropToMask(PTA  *ptas,
+              PIX  *pixm)
+{
+l_int32   i, n, x, y;
+l_uint32  val;
+PTA      *ptad;
+
+    PROCNAME("ptaCropToMask");
+
+    if (!ptas)
+        return (PTA *)ERROR_PTR("ptas not defined", procName, NULL);
+    if (!pixm || pixGetDepth(pixm) != 1)
+        return (PTA *)ERROR_PTR("pixm undefined or not 1 bpp", procName, NULL);
+    if (ptaGetCount(ptas) == 0) {
+        L_INFO("ptas is empty\n", procName);
+        return ptaCopy(ptas);
+    }
+
+    n = ptaGetCount(ptas);
+    ptad = ptaCreate(n);
+    for (i = 0; i < n; i++) {
+        ptaGetIPt(ptas, i, &x, &y);
+        pixGetPixel(pixm, x, y, &val);
+        if (val == 1)
+            ptaAddPt(ptad, x, y);
+    }
+    return ptad;
+}
+
+
 /*---------------------------------------------------------------------*
  *                            Least Squares Fit                        *
  *---------------------------------------------------------------------*/
@@ -916,9 +1003,9 @@ PTA       *ptad;
  *
  * <pre>
  * Notes:
- *      (1) Either or both \&a and \&b must be input.  They determine the
+ *      (1) Either or both &a and &b must be input.  They determine the
  *          type of line that is fit.
- *      (2) If both \&a and \&b are defined, this returns a and b that minimize:
+ *      (2) If both &a and &b are defined, this returns a and b that minimize:
  *
  *              sum (yi - axi -b)^2
  *               i
@@ -927,14 +1014,15 @@ PTA       *ptad;
  *          and solve the resulting two equations for a and b in terms of
  *          various sums over the input data (xi, yi).
  *      (3) We also allow two special cases, where either a = 0 or b = 0:
- *           (a) If \&a is given and \&b = null, find the linear LSF that
+ *           (a) If &a is given and &b = null, find the linear LSF that
  *               goes through the origin (b = 0).
- *           (b) If \&b is given and \&a = null, find the linear LSF with
+ *           (b) If &b is given and &a = null, find the linear LSF with
  *               zero slope (a = 0).
- *      (4) If %nafit is defined, this returns an array of fitted values,
+ *      (4) If &nafit is defined, this returns an array of fitted values,
  *          corresponding to the two implicit Numa arrays (nax and nay) in pta.
  *          Thus, just as you can plot the data in pta as nay vs. nax,
  *          you can plot the linear least square fit as nafit vs. nax.
+ *          Get the nax array using ptaGetArrays(pta, &nax, NULL);
  * </pre>
  */
 l_int32
@@ -949,11 +1037,11 @@ l_float32  *xa, *ya;
 
     PROCNAME("ptaGetLinearLSF");
 
-    if (!pa && !pb)
-        return ERROR_INT("neither &a nor &b are defined", procName, 1);
     if (pa) *pa = 0.0;
     if (pb) *pb = 0.0;
     if (pnafit) *pnafit = NULL;
+    if (!pa && !pb && !pnafit)
+        return ERROR_INT("no output requested", procName, 1);
     if (!pta)
         return ERROR_INT("pta not defined", procName, 1);
     if ((n = ptaGetCount(pta)) < 2)
@@ -961,7 +1049,6 @@ l_float32  *xa, *ya;
 
     xa = pta->x;  /* not a copy */
     ya = pta->y;  /* not a copy */
-
     sx = sy = sxx = sxy = 0.;
     if (pa && pb) {  /* general line */
         for (i = 0; i < n; i++) {
@@ -998,7 +1085,6 @@ l_float32  *xa, *ya;
             numaAddNumber(*pnafit, val);
         }
     }
-
     return 0;
 }
 
@@ -1028,10 +1114,11 @@ l_float32  *xa, *ya;
  *             f[0][0]a + f[0][1]b + f[0][2]c = g[0]
  *             f[1][0]a + f[1][1]b + f[1][2]c = g[1]
  *             f[2][0]a + f[2][1]b + f[2][2]c = g[2]
- *      (2) If %nafit is defined, this returns an array of fitted values,
+ *      (2) If &nafit is defined, this returns an array of fitted values,
  *          corresponding to the two implicit Numa arrays (nax and nay) in pta.
  *          Thus, just as you can plot the data in pta as nay vs. nax,
  *          you can plot the linear least square fit as nafit vs. nax.
+ *          Get the nax array using ptaGetArrays(pta, &nax, NULL);
  * </pre>
  */
 l_int32
@@ -1046,24 +1133,22 @@ l_float32   x, y, sx, sy, sx2, sx3, sx4, sxy, sx2y;
 l_float32  *xa, *ya;
 l_float32  *f[3];
 l_float32   g[3];
-NUMA       *nafit;
 
     PROCNAME("ptaGetQuadraticLSF");
 
-    if (!pa && !pb && !pc && !pnafit)
-        return ERROR_INT("no output requested", procName, 1);
     if (pa) *pa = 0.0;
     if (pb) *pb = 0.0;
     if (pc) *pc = 0.0;
     if (pnafit) *pnafit = NULL;
+    if (!pa && !pb && !pc && !pnafit)
+        return ERROR_INT("no output requested", procName, 1);
     if (!pta)
         return ERROR_INT("pta not defined", procName, 1);
-
     if ((n = ptaGetCount(pta)) < 3)
         return ERROR_INT("less than 3 pts found", procName, 1);
+
     xa = pta->x;  /* not a copy */
     ya = pta->y;  /* not a copy */
-
     sx = sy = sx2 = sx3 = sx4 = sxy = sx2y = 0.;
     for (i = 0; i < n; i++) {
         x = xa[i];
@@ -1103,15 +1188,13 @@ NUMA       *nafit;
     if (pb) *pb = g[1];
     if (pc) *pc = g[2];
     if (pnafit) {
-        nafit = numaCreate(n);
-        *pnafit = nafit;
+        *pnafit = numaCreate(n);
         for (i = 0; i < n; i++) {
             x = xa[i];
             y = g[0] * x * x + g[1] * x + g[2];
-            numaAddNumber(nafit, y);
+            numaAddNumber(*pnafit, y);
         }
     }
-
     return 0;
 }
 
@@ -1144,10 +1227,11 @@ NUMA       *nafit;
  *             f[1][0]a + f[1][1]b + f[1][2]c + f[1][3] = g[1]
  *             f[2][0]a + f[2][1]b + f[2][2]c + f[2][3] = g[2]
  *             f[3][0]a + f[3][1]b + f[3][2]c + f[3][3] = g[3]
- *      (2) If %nafit is defined, this returns an array of fitted values,
+ *      (2) If &nafit is defined, this returns an array of fitted values,
  *          corresponding to the two implicit Numa arrays (nax and nay) in pta.
  *          Thus, just as you can plot the data in pta as nay vs. nax,
  *          you can plot the linear least square fit as nafit vs. nax.
+ *          Get the nax array using ptaGetArrays(pta, &nax, NULL);
  * </pre>
  */
 l_int32
@@ -1163,25 +1247,23 @@ l_float32   x, y, sx, sy, sx2, sx3, sx4, sx5, sx6, sxy, sx2y, sx3y;
 l_float32  *xa, *ya;
 l_float32  *f[4];
 l_float32   g[4];
-NUMA       *nafit;
 
     PROCNAME("ptaGetCubicLSF");
 
-    if (!pa && !pb && !pc && !pd && !pnafit)
-        return ERROR_INT("no output requested", procName, 1);
     if (pa) *pa = 0.0;
     if (pb) *pb = 0.0;
     if (pc) *pc = 0.0;
     if (pd) *pd = 0.0;
     if (pnafit) *pnafit = NULL;
+    if (!pa && !pb && !pc && !pd && !pnafit)
+        return ERROR_INT("no output requested", procName, 1);
     if (!pta)
         return ERROR_INT("pta not defined", procName, 1);
-
     if ((n = ptaGetCount(pta)) < 4)
         return ERROR_INT("less than 4 pts found", procName, 1);
+
     xa = pta->x;  /* not a copy */
     ya = pta->y;  /* not a copy */
-
     sx = sy = sx2 = sx3 = sx4 = sx5 = sx6 = sxy = sx2y = sx3y = 0.;
     for (i = 0; i < n; i++) {
         x = xa[i];
@@ -1233,15 +1315,13 @@ NUMA       *nafit;
     if (pc) *pc = g[2];
     if (pd) *pd = g[3];
     if (pnafit) {
-        nafit = numaCreate(n);
-        *pnafit = nafit;
+        *pnafit = numaCreate(n);
         for (i = 0; i < n; i++) {
             x = xa[i];
             y = g[0] * x * x * x + g[1] * x * x + g[2] * x + g[3];
-            numaAddNumber(nafit, y);
+            numaAddNumber(*pnafit, y);
         }
     }
-
     return 0;
 }
 
@@ -1277,10 +1357,11 @@ NUMA       *nafit;
  *             f[2][0]a + f[2][1]b + f[2][2]c + f[2][3] + f[2][4] = g[2]
  *             f[3][0]a + f[3][1]b + f[3][2]c + f[3][3] + f[3][4] = g[3]
  *             f[4][0]a + f[4][1]b + f[4][2]c + f[4][3] + f[4][4] = g[4]
- *      (2) If %nafit is defined, this returns an array of fitted values,
+ *      (2) If &nafit is defined, this returns an array of fitted values,
  *          corresponding to the two implicit Numa arrays (nax and nay) in pta.
  *          Thus, just as you can plot the data in pta as nay vs. nax,
  *          you can plot the linear least square fit as nafit vs. nax.
+ *          Get the nax array using ptaGetArrays(pta, &nax, NULL);
  * </pre>
  */
 l_int32
@@ -1298,26 +1379,24 @@ l_float32   sxy, sx2y, sx3y, sx4y;
 l_float32  *xa, *ya;
 l_float32  *f[5];
 l_float32   g[5];
-NUMA       *nafit;
 
     PROCNAME("ptaGetQuarticLSF");
 
-    if (!pa && !pb && !pc && !pd && !pe && !pnafit)
-        return ERROR_INT("no output requested", procName, 1);
     if (pa) *pa = 0.0;
     if (pb) *pb = 0.0;
     if (pc) *pc = 0.0;
     if (pd) *pd = 0.0;
     if (pe) *pe = 0.0;
     if (pnafit) *pnafit = NULL;
+    if (!pa && !pb && !pc && !pd && !pe && !pnafit)
+        return ERROR_INT("no output requested", procName, 1);
     if (!pta)
         return ERROR_INT("pta not defined", procName, 1);
-
     if ((n = ptaGetCount(pta)) < 5)
         return ERROR_INT("less than 5 pts found", procName, 1);
+
     xa = pta->x;  /* not a copy */
     ya = pta->y;  /* not a copy */
-
     sx = sy = sx2 = sx3 = sx4 = sx5 = sx6 = sx7 = sx8 = 0;
     sxy = sx2y = sx3y = sx4y = 0.;
     for (i = 0; i < n; i++) {
@@ -1384,16 +1463,14 @@ NUMA       *nafit;
     if (pd) *pd = g[3];
     if (pe) *pe = g[4];
     if (pnafit) {
-        nafit = numaCreate(n);
-        *pnafit = nafit;
+        *pnafit = numaCreate(n);
         for (i = 0; i < n; i++) {
             x = xa[i];
             y = g[0] * x * x * x * x + g[1] * x * x * x + g[2] * x * x
                  + g[3] * x + g[4];
-            numaAddNumber(nafit, y);
+            numaAddNumber(*pnafit, y);
         }
     }
-
     return 0;
 }
 
@@ -1415,9 +1492,9 @@ NUMA       *nafit;
  * Notes:
  *      (1) This does a linear least square fit to the set of points
  *          in %pta.  It then evaluates the errors and removes points
- *          whose error is \>= factor * median_error.  It then re-runs
+ *          whose error is >= factor * median_error.  It then re-runs
  *          the linear LSF on the resulting points.
- *      (2) Either or both \&a and \&b must be input.  They determine the
+ *      (2) Either or both &a and &b must be input.  They determine the
  *          type of line that is fit.
  *      (3) The median error can give an indication of how good the fit
  *          is likely to be.
@@ -1439,13 +1516,13 @@ PTA       *ptad;
 
     PROCNAME("ptaNoisyLinearLSF");
 
-    if (!pa && !pb)
-        return ERROR_INT("neither &a nor &b are defined", procName, 1);
     if (pptad) *pptad = NULL;
     if (pa) *pa = 0.0;
     if (pb) *pb = 0.0;
     if (pmederr) *pmederr = 0.0;
     if (pnafit) *pnafit = NULL;
+    if (!pptad && !pa && !pb && !pnafit)
+        return ERROR_INT("no output requested", procName, 1);
     if (!pta)
         return ERROR_INT("pta not defined", procName, 1);
     if (factor <= 0.0)
@@ -1506,7 +1583,7 @@ PTA       *ptad;
  * Notes:
  *      (1) This does a quadratic least square fit to the set of points
  *          in %pta.  It then evaluates the errors and removes points
- *          whose error is \>= factor * median_error.  It then re-runs
+ *          whose error is >= factor * median_error.  It then re-runs
  *          a quadratic LSF on the resulting points.
  * </pre>
  */
@@ -1527,14 +1604,14 @@ PTA       *ptad;
 
     PROCNAME("ptaNoisyQuadraticLSF");
 
-    if (!pptad && !pa && !pb && !pc && !pnafit)
-        return ERROR_INT("no output requested", procName, 1);
     if (pptad) *pptad = NULL;
     if (pa) *pa = 0.0;
     if (pb) *pb = 0.0;
     if (pc) *pc = 0.0;
     if (pmederr) *pmederr = 0.0;
     if (pnafit) *pnafit = NULL;
+    if (!pptad && !pa && !pb && !pc && !pnafit)
+        return ERROR_INT("no output requested", procName, 1);
     if (factor <= 0.0)
         return ERROR_INT("factor must be > 0.0", procName, 1);
     if (!pta)
@@ -1701,9 +1778,8 @@ l_float32  x2;
  *
  * <pre>
  * Notes:
- *      (1) We remove any existing colormap and clip the pta to the input pixs.
- *      (2) This is a debugging function, and does not remove temporary
- *          plotting files that it generates.
+ *      (1) This is a debugging function.
+ *      (2) Removes existing colormaps and clips the pta to the input %pixs.
  *      (3) If the image is RGB, three separate plots are generated.
  * </pre>
  */
@@ -1722,6 +1798,8 @@ NUMA           *na, *nar, *nag, *nab;
 PIX            *pixt;
 
     PROCNAME("pixPlotAlongPta");
+
+    lept_mkdir("lept/plot");
 
     if (!pixs)
         return ERROR_INT("pixs not defined", procName, 1);
@@ -1757,13 +1835,13 @@ PIX            *pixt;
             numaAddNumber(nab, bval);
         }
 
-        sprintf(buffer, "/tmp/junkplot.%d", count++);
+        snprintf(buffer, sizeof(buffer), "/tmp/lept/plot/%03d", count++);
         rtitle = stringJoin("Red: ", title);
         gplotSimple1(nar, outformat, buffer, rtitle);
-        sprintf(buffer, "/tmp/junkplot.%d", count++);
+        snprintf(buffer, sizeof(buffer), "/tmp/lept/plot/%03d", count++);
         gtitle = stringJoin("Green: ", title);
         gplotSimple1(nag, outformat, buffer, gtitle);
-        sprintf(buffer, "/tmp/junkplot.%d", count++);
+        snprintf(buffer, sizeof(buffer), "/tmp/lept/plot/%03d", count++);
         btitle = stringJoin("Blue: ", title);
         gplotSimple1(nab, outformat, buffer, btitle);
         numaDestroy(&nar);
@@ -1784,7 +1862,7 @@ PIX            *pixt;
             numaAddNumber(na, (l_float32)val);
         }
 
-        sprintf(buffer, "/tmp/junkplot.%d", count++);
+        snprintf(buffer, sizeof(buffer), "/tmp/lept/plot/%03d", count++);
         gplotSimple1(na, outformat, buffer, title);
         numaDestroy(&na);
     }
@@ -2012,7 +2090,7 @@ PTAA    *ptaa;
 
 
 /*!
- * \brief   ptaaIndexLabelledPixels()
+ * \brief   ptaaIndexLabeledPixels()
  *
  * \param[in]    pixs 32 bpp, of indices of c.c.
  * \param[out]   pncc [optional] number of connected components
@@ -2033,8 +2111,8 @@ PTAA    *ptaa;
  * </pre>
  */
 PTAA *
-ptaaIndexLabelledPixels(PIX      *pixs,
-                        l_int32  *pncc)
+ptaaIndexLabeledPixels(PIX      *pixs,
+                       l_int32  *pncc)
 {
 l_int32    wpl, index, i, j, w, h;
 l_uint32   maxval;
@@ -2042,7 +2120,7 @@ l_uint32  *data, *line;
 PTA       *pta;
 PTAA      *ptaa;
 
-    PROCNAME("ptaaIndexLabelledPixels");
+    PROCNAME("ptaaIndexLabeledPixels");
 
     if (pncc) *pncc = 0;
     if (!pixs || (pixGetDepth(pixs) != 32))
@@ -2133,6 +2211,110 @@ PTA     *pta;
     }
 
     return pta;
+}
+
+
+/*---------------------------------------------------------------------*
+ *                    Interconversion with Numa                        *
+ *---------------------------------------------------------------------*/
+/*!
+ * \brief   numaConvertToPta1()
+ *
+ * \param[in]   na    numa with implicit y(x)
+ * \return  pta if OK; null on error
+ */
+PTA *
+numaConvertToPta1(NUMA  *na)
+{
+l_int32    i, n;
+l_float32  startx, delx, val;
+PTA       *pta;
+
+    PROCNAME("numaConvertToPta1");
+
+    if (!na)
+        return (PTA *)ERROR_PTR("na not defined", procName, NULL);
+
+    n = numaGetCount(na);
+    pta = ptaCreate(n);
+    numaGetParameters(na, &startx, &delx);
+    for (i = 0; i < n; i++) {
+        numaGetFValue(na, i, &val);
+        ptaAddPt(pta, startx + i * delx, val);
+    }
+    return pta;
+}
+
+
+/*!
+ * \brief   numaConvertToPta2()
+ *
+ * \param[in]   nax
+ * \param[in]   nay
+ * \return  pta if OK; null on error
+ */
+PTA *
+numaConvertToPta2(NUMA  *nax,
+                  NUMA  *nay)
+{
+l_int32    i, n, nx, ny;
+l_float32  valx, valy;
+PTA       *pta;
+
+    PROCNAME("numaConvertToPta2");
+
+    if (!nax || !nay)
+        return (PTA *)ERROR_PTR("nax and nay not both defined", procName, NULL);
+
+    nx = numaGetCount(nax);
+    ny = numaGetCount(nay);
+    n = L_MIN(nx, ny);
+    if (nx != ny)
+        L_WARNING("nx = %d does not equal ny = %d\n", procName, nx, ny);
+    pta = ptaCreate(n);
+    for (i = 0; i < n; i++) {
+        numaGetFValue(nax, i, &valx);
+        numaGetFValue(nay, i, &valy);
+        ptaAddPt(pta, valx, valy);
+    }
+    return pta;
+}
+
+
+/*!
+ * \brief   ptaConvertToNuma()
+ *
+ * \param[in]   pta
+ * \param[out]  pnax    addr of nax
+ * \param[out]  pnay    addr of nay
+ * \return  0 if OK, 1 on error
+ */
+l_int32
+ptaConvertToNuma(PTA    *pta,
+                 NUMA  **pnax,
+                 NUMA  **pnay)
+{
+l_int32    i, n;
+l_float32  valx, valy;
+
+    PROCNAME("ptaConvertToNuma");
+
+    if (pnax) *pnax = NULL;
+    if (pnay) *pnay = NULL;
+    if (!pnax || !pnay)
+        return ERROR_INT("&nax and &nay not both defined", procName, 1);
+    if (!pta)
+        return ERROR_INT("pta not defined", procName, 1);
+
+    n = ptaGetCount(pta);
+    *pnax = numaCreate(n);
+    *pnay = numaCreate(n);
+    for (i = 0; i < n; i++) {
+        ptaGetPt(pta, i, &valx, &valy);
+        numaAddNumber(*pnax, valx);
+        numaAddNumber(*pnay, valy);
+    }
+    return 0;
 }
 
 
@@ -2428,8 +2610,10 @@ PTA       *pta;
     pixGetDimensions(pixd, &w, &h, NULL);
 
         /* Make a colormap for the paths */
-    if ((pixela = (l_uint32 *)LEPT_CALLOC(npta, sizeof(l_uint32))) == NULL)
+    if ((pixela = (l_uint32 *)LEPT_CALLOC(npta, sizeof(l_uint32))) == NULL) {
+        pixDestroy(&pixd);
         return (PIX *)ERROR_PTR("calloc fail for pixela", procName, NULL);
+    }
     na1 = numaPseudorandomSequence(256, 14657);
     na2 = numaPseudorandomSequence(256, 34631);
     na3 = numaPseudorandomSequence(256, 54617);
