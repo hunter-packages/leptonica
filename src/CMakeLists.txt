@@ -22,23 +22,29 @@ set_target_properties           (leptonica PROPERTIES OUTPUT_NAME       leptonic
 set_target_properties           (leptonica PROPERTIES DEBUG_OUTPUT_NAME leptonica-${VERSION_PLAIN}d)
 endif()
 
-if (NOT STATIC)
+if (BUILD_SHARED_LIBS)
     target_compile_definitions  (leptonica PRIVATE -DLIBLEPT_EXPORTS)
 endif()
 
+target_include_directories(
+    leptonica
+    INTERFACE
+    "$<INSTALL_INTERFACE:include/leptonica>"
+)
+
 if (GIF_LIBRARY)
-    target_link_libraries       (leptonica ${GIF_LIBRARY})
+    target_link_libraries       (leptonica PUBLIC ${GIF_LIBRARY})
 endif()
 if (JP2K_FOUND)
-    target_link_libraries       (leptonica ${JP2K_LIBRARIES})
+    target_link_libraries       (leptonica PUBLIC ${JP2K_LIBRARIES})
 endif()
 if (WEBP_FOUND)
-    target_link_libraries       (leptonica ${WEBP_LIBRARIES})
+    target_link_libraries       (leptonica PUBLIC ${WEBP_LIBRARIES})
 endif()
 target_link_libraries           (leptonica PUBLIC JPEG::jpeg PNG::png TIFF::libtiff ZLIB::zlib)
 
 if (UNIX)
-    target_link_libraries       (leptonica m)
+    target_link_libraries       (leptonica PUBLIC m)
 endif()
 
 if (NOT CPPAN_BUILD)
